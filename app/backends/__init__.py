@@ -35,3 +35,11 @@ def image_model(live: bool):
             _live_image = MetaImageModel()
         return _live_image
     return MockImageModel()
+
+
+def segmenter(live: bool):
+    if live and not config.MOCK:
+        from .meta_api import MetaSegmenter
+        return MetaSegmenter()
+    from .mock import MockSegmenter
+    return MockSegmenter()

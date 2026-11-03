@@ -95,3 +95,35 @@ class MockImageModel:
         data = path.read_bytes() if path.exists() else None
         log_stage("image", (time.perf_counter() - t0) * 1000, True, self.name, found=data is not None)
         return data
+
+
+class MockSegmenter:
+    """Offline silhouette: a swaying head-and-shoulders shape, same output format as SAM."""
+
+    name = "mock"
+
+    async def segment(self, jpeg: bytes, frame_w: int, frame_h: int) -> dict | None:
+        import base64
+        import io
+        import math
+
+        from PIL import Image, ImageDraw
+
+        t0 = time.perf_counter()
+        await asyncio.sleep(0.8)
+        sway = math.sin(time.time() * 0.7) * frame_w * 0.08
+        w, h = int(frame_w * 0.34), int(frame_h * 0.9)
+        left = int(frame_w / 2 - w / 2 + sway)
+        top = frame_h - h
+        alpha = Image.new("L", (w, h), 0)
+        d = ImageDraw.Draw(alpha)
+        head = w * 0.28
+        d.ellipse([w / 2 - head / 2, h * 0.04, w / 2 + head / 2, h * 0.04 + head * 1.2], fill=255)
+        d.rounded_rectangle([w * 0.42, h * 0.04 + head * 1.1, w * 0.58, h * 0.32], radius=6, fill=255)
+        d.rounded_rectangle([w * 0.05, h * 0.3, w * 0.95, h * 1.2], radius=int(w * 0.25), fill=255)
+        la = Image.merge("LA", (Image.new("L", (w, h), 255), alpha))
+        out = io.BytesIO()
+        la.save(out, "PNG")
+        log_stage("sam", (time.perf_counter() - t0) * 1000, True, self.name)
+        return {"png": base64.b64encode(out.getvalue()).decode(), "bounds": [left, top, left + w, top + h],
+                "frame": [frame_w, frame_h], "confidence": 1.0, "objects": 1, "decode_ms": 0.0, "raster": [w, h]}

@@ -306,3 +306,44 @@ class MetaImageModel:
         webp = await asyncio.to_thread(to_backdrop_webp, base64.b64decode(data["b64_json"]))
         log_stage("image", ms, True, self.name, out_bytes=len(webp))
         return webp
+
+
+# ------------------------------------------------------------------ Silhouette (SAM 3.1)
+
+class MetaSegmenter:
+    name = "meta_api"
+
+    async def segment(self, jpeg: bytes, frame_w: int, frame_h: int) -> dict | None:
+        from ..sam_mask import main_subject
+
+        body = {
+            "model": config.SAM_MODEL,
+            "input": [{"type": "message", "role": "user", "content": [
+                {"type": "input_text", "text": "person"},
+                {"type": "input_image", "image_url": "data:image/jpeg;base64," + base64.b64encode(jpeg).decode()},
+            ]}],
+            "stream": False,
+            "metadata": {"mask_encoding": "one_bit", "include_confidence": "true"},
+        }
+        t0 = time.perf_counter()
+        try:
+            r = await http().post("/responses", json=body, timeout=config.TIMEOUT_SAM)
+        except httpx.HTTPError as e:
+            log_stage("sam", (time.perf_counter() - t0) * 1000, False, self.name, error=_err(e))
+            raise BackendError(_err(e)) from e
+        ms = (time.perf_counter() - t0) * 1000
+        if r.status_code != 200:
+            log_stage("sam", ms, False, self.name, error=f"HTTP {r.status_code}: {r.text[:200]}")
+            raise BackendError(f"SAM HTTP {r.status_code}")
+        j = r.json()
+        text = j.get("output_text") if isinstance(j.get("output_text"), str) else "".join(
+            c.get("text", "") for item in j.get("output", []) or [] for c in item.get("content", []) or []
+            if c.get("type") == "output_text")
+        try:
+            result = await asyncio.to_thread(main_subject, text, frame_w, frame_h)
+        except Exception as e:  # malformed output: treat as a failed frame, keep the last ghost
+            log_stage("sam", ms, False, self.name, error=f"parse: {_err(e)}")
+            raise BackendError("SAM parse failed") from e
+        log_stage("sam", ms, True, self.name, matches=0 if result is None else result["objects"],
+                  decode_ms=None if result is None else result["decode_ms"])
+        return result

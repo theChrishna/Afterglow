@@ -8,13 +8,14 @@ import time
 import uuid
 from collections import OrderedDict
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from . import backends, config
 from .backends import BackendError
 from .limits import limits
+from .sam_mask import jpeg_size
 from .backends.mock import RELATIVE_WORDS
 from .scene import DEFAULT_SCENE, Scene, bank_scene, match_bank
 from .telemetry import log_event, log_stage, summary
@@ -239,6 +240,52 @@ class Stage:
             _generated.popitem(last=False)
         if seq == self.cue_seq:
             await self.send(type="backdrop", url=f"/api/backdrop/{bid}", generated=True)
+
+
+MAX_FRAME_JPEG = 400_000
+
+
+def _sam_refusal(error: str, status: int, ip: str, detail: str) -> JSONResponse:
+    return JSONResponse({"error": error, "detail": detail,
+                         "perform_left_s": round(limits.perform_remaining(ip))}, status_code=status)
+
+
+@app.post("/api/silhouette")
+async def silhouette(request: Request):
+    """One webcam frame (JPEG) -> the performer's mask. Gated by Perform time per IP,
+    a per-IP rate limit and the daily budget."""
+    ip = client_ip(request.headers, request.client)
+    if limits.perform_remaining(ip) <= 0:
+        return _sam_refusal("perform_time_up", 429, ip,
+                            f"Perform mode is limited to {limits.perform_seconds // 60} min per visitor per day.")
+    if not limits.allow(ip, "sam"):
+        return _sam_refusal("too_fast", 429, ip, "One frame every 3 s.")
+    if int(request.headers.get("content-length") or 0) > MAX_FRAME_JPEG:
+        return _sam_refusal("too_large", 413, ip, "Frame too large.")
+    jpeg = await request.body()
+    try:
+        if len(jpeg) > MAX_FRAME_JPEG:
+            raise ValueError("too large")
+        fw, fh = await asyncio.to_thread(jpeg_size, jpeg)
+    except Exception:
+        return _sam_refusal("bad_frame", 400, ip, "Send one JPEG frame.")
+    live = not config.MOCK and limits.can_spend(config.PRICE_SAM)
+    if not config.MOCK and not live:
+        return _sam_refusal("budget", 503, ip, "Ghost echo paused: daily budget reached.")
+    limits.start_perform(ip)
+    seg = backends.segmenter(live)
+    t0 = time.perf_counter()
+    try:
+        mask = await asyncio.wait_for(seg.segment(jpeg, fw, fh), config.TIMEOUT_SAM)
+    except (BackendError, asyncio.TimeoutError):
+        return _sam_refusal("sam_failed", 502, ip, "Silhouette unavailable; keeping the last echo.")
+    finally:
+        if live:
+            limits.charge("sam", config.PRICE_SAM)  # billed per image, match or not
+    log_stage("silhouette_total", (time.perf_counter() - t0) * 1000, True, seg.name,
+              matched=mask is not None)
+    return JSONResponse({"mask": mask, "source": seg.name,
+                         "perform_left_s": round(limits.perform_remaining(ip))})
 
 
 @app.websocket("/ws/stage")

@@ -42,8 +42,15 @@
   #caption.show { opacity: 1; }
   #caption.partial { color: var(--ui-dim); font-style: italic; }
 
-  #mood { position: absolute; left: 16px; bottom: calc(18px + env(safe-area-inset-bottom)); font-size: 13px; color: var(--ui-dim); max-width: 40%; }
+  #mood { position: absolute; left: 16px; bottom: calc(18px + env(safe-area-inset-bottom)); font-size: 13px; color: var(--ui-dim); max-width: 45%;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   #mood b { color: var(--ui); font-weight: 600; }
+  #prov { position: absolute; left: 16px; top: calc(40px + env(safe-area-inset-top)); font-size: 11px; flex-wrap: wrap; max-width: calc(100% - 32px);
+    letter-spacing: .06em; color: var(--ui-dim); text-transform: uppercase; display: flex; gap: 6px; align-items: center; }
+  #prov .chip { padding: 2px 7px; border-radius: 999px; background: rgba(255,255,255,.1); color: var(--ui); text-transform: none; letter-spacing: 0; }
+  #prov .chip.made { background: rgba(255,255,255,.88); color: #000; }
+  #prov.flash .chip { animation: chipin .6s ease; }
+  @keyframes chipin { from { opacity: .2; transform: translateY(3px); } }
   #timing { position: absolute; right: 16px; bottom: calc(18px + env(safe-area-inset-bottom)); font-size: 12px;
     color: var(--ui-dim); font-variant-numeric: tabular-nums; text-align: right; }
 
@@ -53,6 +60,13 @@
     color: #fff; background: rgba(255,255,255,.14); backdrop-filter: blur(10px); cursor: pointer; touch-action: none;
     user-select: none; -webkit-user-select: none; transition: background .15s, transform .15s; }
   #ptt.active { background: #ff3b5c; transform: scale(1.04); }
+  #perform { flex: 0 0 auto; border: 1px solid rgba(255,255,255,.22); border-radius: 999px; padding: 13px 16px; font: inherit;
+    font-size: 14px; color: #fff; background: rgba(0,0,0,.4); backdrop-filter: blur(10px); cursor: pointer;
+    font-variant-numeric: tabular-nums; white-space: nowrap; }
+  #perform[aria-pressed="true"] { background: rgba(255,255,255,.9); color: #000; border-color: transparent; }
+  #perform:disabled { opacity: .45; cursor: default; }
+  #ghost { mix-blend-mode: screen; }
+  #cam { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
   #cue { flex: 1 1 auto; min-width: 0; border: 1px solid rgba(255,255,255,.18); border-radius: 999px; padding: 13px 16px;
     font: inherit; color: #fff; background: rgba(0,0,0,.4); backdrop-filter: blur(10px); outline: none; }
   #cue:focus { border-color: rgba(255,255,255,.5); }
@@ -66,7 +80,8 @@
     background: #fff; color: #000; }
   #start small { display: block; margin-top: 14px; color: var(--ui-dim); }
   .kbd { display: inline-block; padding: 0 6px; border: 1px solid rgba(255,255,255,.35); border-radius: 4px; font-size: 12px; }
-  @media (max-width: 560px) { #mood { max-width: 55%; } #timing { display: none; } #caption { bottom: calc(110px + env(safe-area-inset-bottom)); } }
+  @media (max-width: 560px) { #mood { max-width: 55%; } #timing { display: none; }
+    #perform { padding: 13px 12px; } #caption { bottom: calc(110px + env(safe-area-inset-bottom)); } }
 </style>
 </head>
 <body>
@@ -74,6 +89,7 @@
   <div id="backdrop"><div class="bd"></div><div class="bd"></div></div>
   <canvas id="fx"></canvas>
   <canvas id="ghost"></canvas>
+  <video id="cam" playsinline muted></video>
   <div id="tint"></div>
   <div id="hud">
     <div class="brand">AFTERGLOW</div>
@@ -81,8 +97,10 @@
     <div id="caption"></div>
     <div id="controls">
       <button id="ptt" aria-label="Hold to speak a cue">Hold to speak</button>
+      <button id="perform" class="pill" aria-pressed="false" title="Ghost echo of your silhouette (camera, 3 min per visitor)">Perform</button>
       <input id="cue" type="text" maxlength="300" placeholder="…or type a cue and press Enter" autocomplete="off">
     </div>
+    <div id="prov" title="preset = premade, instant · Muse Spark = scene written live for your cue · Muse Image · new = backdrop generated live"></div>
     <div id="mood"></div>
     <div id="timing"></div>
   </div>
@@ -91,7 +109,7 @@
       <h1>AFTERGLOW</h1>
       <p>Speak a cue and the stage answers: light and motion change at once, and a new backdrop drifts in a few seconds later.</p>
       <button id="go">Enter the stage</button>
-      <small>Hold <span class="kbd">Space</span> or the button to speak · <span class="kbd">H</span> hides the controls</small>
+      <small>Hold <span class="kbd">Space</span> or the button to speak · <span class="kbd">P</span> Perform (camera ghost echo) · <span class="kbd">H</span> hides the controls</small>
     </div>
   </div>
 </div>
@@ -297,6 +315,7 @@ function frame(now) {
     gl.uniform3fv(u.u_c0, cur.c[0]); gl.uniform3fv(u.u_c1, cur.c[1]); gl.uniform3fv(u.u_c2, cur.c[2]);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
   }
+  drawGhosts(now);
   requestAnimationFrame(frame);
 }
 
@@ -336,13 +355,34 @@ function setCaption(text, partial) {
   clearTimeout(captionTimer);
   captionTimer = setTimeout(() => el.classList.remove("show"), partial ? 8000 : 6000);
 }
-const timing = { release: 0, final: 0 };
-function showTiming(sceneAt) {
+const timing = { release: 0, final: 0, preset: null };
+function showTiming(sceneAt, source) {
+  const from = timing.final || timing.release;
+  if (!from) return;
+  const s = ((sceneAt - from) / 1000).toFixed(2);
+  if (source === "instant") { timing.preset = s; return; }
   const parts = [];
   if (timing.release && timing.final) parts.push(`voice ${((timing.final - timing.release) / 1000).toFixed(2)}s`);
-  const from = timing.final || timing.release;
-  if (from) parts.push(`scene ${((sceneAt - from) / 1000).toFixed(2)}s`);
+  if (timing.preset) parts.push(`preset ${timing.preset}s`);
+  parts.push(`${source === "meta_api" ? "Muse Spark" : "scene"} ${s}s`);
   $("#timing").textContent = parts.join(" · ");
+  timing.preset = null;
+}
+
+// What the audience is looking at right now: premade preset vs. live-generated output.
+const stage = { mode: "", scene: "standby", backdrop: "bank" };
+const SCENE_LABEL = { standby: "standby", instant: "preset", meta_api: "Muse Spark", mock: "mock scene" };
+function setProvenance(scene, backdrop) {
+  if (scene) stage.scene = scene;
+  if (backdrop) stage.backdrop = backdrop;
+  const live = stage.mode === "live";
+  const sc = SCENE_LABEL[stage.scene] || stage.scene;
+  const bd = stage.backdrop === "generated" ? (live ? "Muse Image · new" : "mock image") : "bank image";
+  const chip = (label, made) => `<span class="chip${made ? " made" : ""}">${label}</span>`;
+  const el = $("#prov");
+  el.innerHTML = `scene ${chip(sc, stage.scene === "meta_api")} backdrop ${chip(bd, stage.backdrop === "generated" && live)}`
+    + (stage.echo ? ` echo ${chip(stage.echo, live)}` : "");
+  el.classList.remove("flash"); void el.offsetWidth; el.classList.add("flash");
 }
 
 // ---------------------------------------------------------------- stage socket
@@ -356,17 +396,19 @@ function connect() {
     let m; try { m = JSON.parse(e.data); } catch { return; }
     if (m.type === "hello") {
       $("#status .mode").textContent = m.mode;
-      applyScene(m.scene); setBackdrop(m.backdrop);
+      stage.mode = m.mode;
+      applyScene(m.scene); setBackdrop(m.backdrop); setProvenance("standby", "bank");
     } else if (m.type === "status") {
       setStatus(m.state, m.detail);
     } else if (m.type === "transcript") {
       if (m.final) timing.final = performance.now();
       setCaption(m.text, !m.final);
     } else if (m.type === "scene") {
-      applyScene(m.scene); setBackdrop(m.backdrop); showTiming(performance.now());
-      timing.release = timing.final = 0;
+      applyScene(m.scene); setBackdrop(m.backdrop); setProvenance(m.source, "bank");
+      showTiming(performance.now(), m.source);
+      if (m.source !== "instant") timing.release = timing.final = 0;
     } else if (m.type === "backdrop") {
-      setBackdrop(m.url);
+      setBackdrop(m.url); setProvenance(null, "generated");
     }
   };
 }
@@ -452,6 +494,121 @@ function pttUp() {
   setTimeout(() => mic.node.port.postMessage("off"), 200);  // short tail so the last word isn't clipped
 }
 
+// ---------------------------------------------------------------- Perform mode: webcam → SAM 3.1 → ghost echo
+// A frame goes to the server every ~3.5 s; the mask that comes back is seconds old, so it is
+// drawn as a deliberately delayed, rising, fading echo, never as live tracking.
+const FRAME_W = 640, FRAME_H = 360, CAPTURE_MS = 3500, GHOST_MAX = 6;
+const perf = { on: false, stream: null, timer: null, inflight: false, left: null, leftAt: 0, ghosts: [], mirror: true,
+  cap: Object.assign(document.createElement("canvas"), { width: FRAME_W, height: FRAME_H }),
+  scratch: document.createElement("canvas") };
+
+function perfButton() {
+  const b = $("#perform");
+  b.setAttribute("aria-pressed", perf.on ? "true" : "false");
+  const left = perf.left === null ? null : Math.max(0, perf.left - (performance.now() - perf.leftAt) / 1000);
+  if (left !== null && left <= 0 && !perf.on) { b.textContent = "Perform used"; b.disabled = true; return; }
+  b.textContent = perf.on && left !== null ? `Perform ${Math.floor(left / 60)}:${String(Math.floor(left % 60)).padStart(2, "0")}` : "Perform";
+}
+setInterval(() => { if (perf.on) perfButton(); }, 1000);
+
+async function performOn() {
+  if (perf.on) return;
+  try {
+    perf.stream = await navigator.mediaDevices.getUserMedia({ audio: false,
+      video: { width: { ideal: FRAME_W }, height: { ideal: FRAME_H }, facingMode: "user" } });
+  } catch (err) {
+    console.warn("camera unavailable", err);
+    setStatus("error", "Camera unavailable."); return;
+  }
+  const v = $("#cam"); v.srcObject = perf.stream; await v.play().catch(() => {});
+  perf.on = true; perfButton();
+  captureLoop();
+}
+function performOff() {
+  perf.on = false; clearTimeout(perf.timer);
+  if (perf.stream) perf.stream.getTracks().forEach(t => t.stop());
+  perf.stream = null; perfButton();   // existing ghosts keep fading out on their own
+}
+function captureLoop() {
+  if (!perf.on) return;
+  if (!perf.inflight) sendFrame();
+  perf.timer = setTimeout(captureLoop, CAPTURE_MS);
+}
+async function sendFrame() {
+  const v = $("#cam");
+  if (v.readyState < 2 || !v.videoWidth) return;
+  perf.inflight = true;
+  const tCap = performance.now();
+  // Cover-crop the camera to 16:9 at 640x360 (smaller frames = faster SAM, smaller masks to decode).
+  const s = Math.max(FRAME_W / v.videoWidth, FRAME_H / v.videoHeight);
+  const sw = FRAME_W / s, sh = FRAME_H / s;
+  perf.cap.getContext("2d").drawImage(v, (v.videoWidth - sw) / 2, (v.videoHeight - sh) / 2, sw, sh, 0, 0, FRAME_W, FRAME_H);
+  try {
+    const blob = await new Promise(r => perf.cap.toBlob(r, "image/jpeg", 0.7));
+    const res = await fetch("/api/silhouette", { method: "POST", headers: { "Content-Type": "image/jpeg" }, body: blob });
+    const j = await res.json().catch(() => ({}));
+    if (typeof j.perform_left_s === "number") { perf.left = j.perform_left_s; perf.leftAt = performance.now(); }
+    if (res.ok && j.mask) addGhost(j.mask, tCap);
+    else if (j.error === "perform_time_up" || j.error === "budget") { performOff(); setStatus("limited", j.detail); }
+    else if (!res.ok && j.error !== "too_fast") setStatus("error", j.detail || "Silhouette unavailable.");
+  } catch {
+    setStatus("error", "Silhouette unavailable; keeping the last echo.");
+  } finally {
+    perf.inflight = false; perfButton();
+  }
+}
+function addGhost(mask, tCap) {
+  const img = new Image();
+  img.onload = () => {
+    const now = performance.now();
+    perf.ghosts.push({ img, bounds: mask.bounds, frame: mask.frame, born: now });
+    if (perf.ghosts.length > GHOST_MAX) perf.ghosts.shift();
+    stage.echo = `${((now - tCap) / 1000).toFixed(1)}s behind`;
+    setProvenance(null, null);
+  };
+  img.src = "data:image/png;base64," + mask.png;
+}
+
+const rgb = (c, a) => `rgba(${Math.round(c[0] * 255)},${Math.round(c[1] * 255)},${Math.round(c[2] * 255)},${a})`;
+function drawGhosts(now) {
+  const canvas = $("#ghost"), ctx = canvas.getContext("2d");
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  if (!perf.ghosts.length) return;
+  const W = canvas.width, H = canvas.height, sc = perf.scratch, sctx = sc.getContext("2d");
+  const newest = perf.ghosts[perf.ghosts.length - 1];
+  perf.ghosts = perf.ghosts.filter(g => g === newest || (now - g.born) < 14000);
+  for (const g of perf.ghosts) {
+    const age = (now - g.born) / 1000;
+    const isNew = g === newest;
+    // Newest echo fades in; older echoes rise, swell and fade out like heat shimmer.
+    const alpha = isNew ? 0.6 * Math.min(1, age / 0.8) * (perf.on ? 1 : Math.exp(-age / 6))
+                        : 0.45 * Math.exp(-age / 3.2);
+    if (alpha < 0.01) continue;
+    const [fw, fh] = g.frame, [x1, y1, x2, y2] = g.bounds;
+    // Fit the frame to the screen width; on portrait screens stand the performer on the bottom edge.
+    const s = W / fw, ox = 0, oy = W / H >= fw / fh ? (H - fh * s) / 2 : H - fh * s;
+    const grow = isNew ? 1 : 1 + 0.03 * age, rise = isNew ? 0 : 14 * age;
+    let w = (x2 - x1) * s * grow, h = (y2 - y1) * s * grow;
+    let x = ox + x1 * s - ((x2 - x1) * s * (grow - 1)) / 2;
+    const y = oy + y1 * s - (h - (y2 - y1) * s) - rise;
+    if (perf.mirror) x = W - x - w;
+    // Tint the white mask with the live palette (accent for the newest, mid tone for older echoes).
+    sc.width = g.img.width; sc.height = g.img.height;
+    sctx.drawImage(g.img, 0, 0);
+    sctx.globalCompositeOperation = "source-in";
+    sctx.fillStyle = rgb(isNew ? cur.c[2] : cur.c[1], 1);
+    sctx.fillRect(0, 0, sc.width, sc.height);
+    sctx.globalCompositeOperation = "source-over";
+    ctx.save();
+    if (perf.mirror) { ctx.translate(x + w, y); ctx.scale(-1, 1); ctx.translate(-x, -y); }
+    ctx.globalAlpha = alpha;
+    ctx.shadowColor = rgb(cur.c[2], 0.9);
+    ctx.shadowBlur = isNew ? 28 : 40;
+    ctx.drawImage(sc, x, y, w, h);
+    ctx.restore();
+  }
+}
+
 // ---------------------------------------------------------------- input wiring
 function wireInput() {
   const btn = $("#ptt");
@@ -463,9 +620,14 @@ function wireInput() {
     if (typing()) return;
     if (e.code === "Space") { e.preventDefault(); if (!e.repeat) pttDown(); }
     else if (e.key === "h" || e.key === "H") $("#hud").classList.toggle("hidden");
+    else if (e.key === "p" || e.key === "P") perf.on ? performOff() : performOn();
+    else if (e.key === "m" || e.key === "M") perf.mirror = !perf.mirror;
   });
   addEventListener("keyup", e => { if (e.code === "Space" && !typing()) { e.preventDefault(); pttUp(); } });
   addEventListener("blur", pttUp);
+  $("#perform").addEventListener("click", () => perf.on ? performOff() : performOn());
+  // Don't keep paying for SAM frames nobody is looking at.
+  document.addEventListener("visibilitychange", () => { if (document.hidden && perf.on) performOff(); });
   $("#cue").addEventListener("keydown", e => {
     if (e.key === "Enter") {
       const text = e.target.value.trim();
