@@ -1,0 +1,489 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Afterglow</title>
+<style>
+  :root { --c0: #05010f; --c1: #6a2cff; --c2: #33d1ff; --ui: rgba(255,255,255,.88); --ui-dim: rgba(255,255,255,.55); }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: #000; color: var(--ui); overflow: hidden;
+    font: 15px/1.4 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
+  #stage { position: fixed; inset: 0; }
+  /* Backdrop: palette gradient underneath, so the screen is never blank. */
+  #backdrop { position: absolute; inset: 0; background: radial-gradient(120% 90% at 50% 70%, var(--c1), var(--c0) 70%);
+    transition: filter 1.6s ease; }
+  .bd { position: absolute; inset: 0; background-size: cover; background-position: center; opacity: 0;
+    transition: opacity 2.6s ease; }
+  .bd.on { opacity: 1; }
+  #fx { position: absolute; inset: 0; width: 100%; height: 100%; mix-blend-mode: screen; }
+  #ghost { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+  #tint { position: absolute; inset: 0; mix-blend-mode: soft-light; opacity: 0; transition: opacity 1.6s ease, background-color 1.6s ease; }
+
+  #hud { position: absolute; inset: 0; pointer-events: none; transition: opacity .4s; }
+  #hud.hidden { opacity: 0; }
+  #hud > * { pointer-events: auto; }
+  .brand { position: absolute; top: max(14px, env(safe-area-inset-top)); left: 16px; letter-spacing: .32em;
+    font-size: 12px; font-weight: 600; color: var(--ui-dim); }
+  #status { position: absolute; top: max(10px, env(safe-area-inset-top)); right: 16px; display: flex; align-items: center; gap: 8px;
+    padding: 6px 12px; border-radius: 999px; background: rgba(0,0,0,.45); backdrop-filter: blur(8px); font-size: 13px; }
+  #status .dot { width: 9px; height: 9px; border-radius: 50%; background: #3ddc84; }
+  #status[data-state="listening"] .dot { background: #ff3b5c; animation: pulse 1s infinite; }
+  #status[data-state="transcribing"] .dot, #status[data-state="thinking"] .dot { background: #ffb020; animation: pulse .7s infinite; }
+  #status[data-state="error"] .dot { background: #ff6b3d; }
+  #status[data-state="limited"] .dot, #status[data-state="offline"] .dot { background: #888; }
+  #status .mode { font-size: 11px; letter-spacing: .12em; color: var(--ui-dim); text-transform: uppercase; }
+  @keyframes pulse { 50% { opacity: .35; } }
+
+  #caption { position: absolute; left: 50%; bottom: calc(120px + env(safe-area-inset-bottom)); transform: translateX(-50%);
+    width: min(860px, calc(100% - 32px)); text-align: center; font-size: clamp(18px, 3vw, 28px); font-weight: 500;
+    text-shadow: 0 2px 18px rgba(0,0,0,.8); opacity: 0; transition: opacity .5s; }
+  #caption.show { opacity: 1; }
+  #caption.partial { color: var(--ui-dim); font-style: italic; }
+
+  #mood { position: absolute; left: 16px; bottom: calc(18px + env(safe-area-inset-bottom)); font-size: 13px; color: var(--ui-dim); max-width: 40%; }
+  #mood b { color: var(--ui); font-weight: 600; }
+  #timing { position: absolute; right: 16px; bottom: calc(18px + env(safe-area-inset-bottom)); font-size: 12px;
+    color: var(--ui-dim); font-variant-numeric: tabular-nums; text-align: right; }
+
+  #controls { position: absolute; left: 50%; bottom: calc(44px + env(safe-area-inset-bottom)); transform: translateX(-50%);
+    display: flex; gap: 10px; align-items: center; width: min(560px, calc(100% - 32px)); }
+  #ptt { flex: 0 0 auto; border: 0; border-radius: 999px; padding: 14px 20px; font: inherit; font-weight: 600;
+    color: #fff; background: rgba(255,255,255,.14); backdrop-filter: blur(10px); cursor: pointer; touch-action: none;
+    user-select: none; -webkit-user-select: none; transition: background .15s, transform .15s; }
+  #ptt.active { background: #ff3b5c; transform: scale(1.04); }
+  #cue { flex: 1 1 auto; min-width: 0; border: 1px solid rgba(255,255,255,.18); border-radius: 999px; padding: 13px 16px;
+    font: inherit; color: #fff; background: rgba(0,0,0,.4); backdrop-filter: blur(10px); outline: none; }
+  #cue:focus { border-color: rgba(255,255,255,.5); }
+  #cue::placeholder { color: rgba(255,255,255,.45); }
+
+  #start { position: absolute; inset: 0; display: grid; place-items: center; background: rgba(0,0,0,.55);
+    backdrop-filter: blur(6px); z-index: 10; text-align: center; padding: 16px; }
+  #start h1 { margin: 0 0 6px; font-size: clamp(34px, 7vw, 64px); letter-spacing: .18em; font-weight: 300; }
+  #start p { margin: 0 auto 22px; color: var(--ui-dim); max-width: 460px; }
+  #start button { border: 0; border-radius: 999px; padding: 14px 28px; font: inherit; font-weight: 600; cursor: pointer;
+    background: #fff; color: #000; }
+  #start small { display: block; margin-top: 14px; color: var(--ui-dim); }
+  .kbd { display: inline-block; padding: 0 6px; border: 1px solid rgba(255,255,255,.35); border-radius: 4px; font-size: 12px; }
+  @media (max-width: 560px) { #mood { max-width: 55%; } #timing { display: none; } #caption { bottom: calc(110px + env(safe-area-inset-bottom)); } }
+</style>
+</head>
+<body>
+<div id="stage">
+  <div id="backdrop"><div class="bd"></div><div class="bd"></div></div>
+  <canvas id="fx"></canvas>
+  <canvas id="ghost"></canvas>
+  <div id="tint"></div>
+  <div id="hud">
+    <div class="brand">AFTERGLOW</div>
+    <div id="status" data-state="offline"><span class="dot"></span><span class="text">connecting…</span><span class="mode"></span></div>
+    <div id="caption"></div>
+    <div id="controls">
+      <button id="ptt" aria-label="Hold to speak a cue">Hold to speak</button>
+      <input id="cue" type="text" maxlength="300" placeholder="…or type a cue and press Enter" autocomplete="off">
+    </div>
+    <div id="mood"></div>
+    <div id="timing"></div>
+  </div>
+  <div id="start">
+    <div>
+      <h1>AFTERGLOW</h1>
+      <p>Speak a cue and the stage answers: light and motion change at once, and a new backdrop drifts in a few seconds later.</p>
+      <button id="go">Enter the stage</button>
+      <small>Hold <span class="kbd">Space</span> or the button to speak · <span class="kbd">H</span> hides the controls</small>
+    </div>
+  </div>
+</div>
+
+<script>
+"use strict";
+// ---------------------------------------------------------------- scene state + easing
+const STYLES = ["grid", "rain", "nebula", "smoke", "aurora", "embers"];
+const hexToRgb = h => [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16) / 255);
+const cur = { c: [[.02,.004,.06],[.42,.17,1],[.2,.82,1]], intensity: .55, warmth: -.2, bpm: 0, speed: .35, grain: .15 };
+const tgt = JSON.parse(JSON.stringify(cur));
+const style = { a: 2, b: 2, mix: 0, queued: null };
+let phaseT = 0, beatPhase = 0;
+
+function applyScene(s) {
+  tgt.c = s.palette.map(hexToRgb);
+  tgt.intensity = s.lighting.intensity; tgt.warmth = s.lighting.warmth; tgt.bpm = s.lighting.pulse_bpm;
+  tgt.speed = s.shader.speed; tgt.grain = s.shader.grain;
+  const idx = Math.max(0, STYLES.indexOf(s.shader.style));
+  if (style.mix > 0) style.queued = idx;          // finish the running crossfade first
+  else if (idx !== style.a) { style.b = idx; style.mix = 0.0001; }
+  const root = document.documentElement.style;
+  root.setProperty("--c0", s.palette[0]); root.setProperty("--c1", s.palette[1]); root.setProperty("--c2", s.palette[2]);
+  // Backdrop dims/brightens with the lighting; warm/cold tint layer on top.
+  $("#backdrop").style.filter = `brightness(${(0.38 + 0.5 * s.lighting.intensity).toFixed(2)}) saturate(${(0.85 + 0.4 * s.lighting.intensity).toFixed(2)})`;
+  const tint = $("#tint");
+  tint.style.backgroundColor = s.lighting.warmth >= 0 ? "#ff9a3c" : "#3c8cff";
+  tint.style.opacity = (Math.abs(s.lighting.warmth) * 0.55).toFixed(2);
+  $("#mood").innerHTML = `<b>${escapeHtml(s.mood)}</b> · ${s.shader.style}${s.lighting.pulse_bpm > 0 ? ` · ${Math.round(s.lighting.pulse_bpm)} bpm` : ""}`;
+}
+
+function ease(dt) {
+  const k = 1 - Math.exp(-dt / 0.9);
+  for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) cur.c[i][j] += (tgt.c[i][j] - cur.c[i][j]) * k;
+  for (const f of ["intensity", "warmth", "bpm", "speed", "grain"]) cur[f] += (tgt[f] - cur[f]) * k;
+  if (style.mix > 0) {
+    style.mix += dt / 1.8;
+    if (style.mix >= 1) {
+      style.a = style.b; style.mix = 0;
+      if (style.queued !== null && style.queued !== style.a) { style.b = style.queued; style.mix = 0.0001; }
+      style.queued = null;
+    }
+  }
+  phaseT += dt * (0.15 + cur.speed);                // integrated, so speed changes never jump
+  beatPhase += dt * cur.bpm / 60;
+}
+
+// ---------------------------------------------------------------- WebGL shader
+const FRAG = `
+precision mediump float;
+uniform vec2 u_res; uniform float u_t, u_time, u_intensity, u_warmth, u_beat, u_grain, u_styleA, u_styleB, u_mix;
+uniform vec3 u_c0, u_c1, u_c2;
+float hash(vec2 p){ p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }
+float noise(vec2 p){ vec2 i = floor(p), f = fract(p); vec2 u = f * f * (3.0 - 2.0 * f);
+  return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), u.x), mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), u.x), u.y); }
+float fbm(vec2 p){ float v = 0.0, a = 0.5; for (int i = 0; i < 5; i++) { v += a * noise(p); p = p * 2.03 + vec2(1.7, 9.2); a *= 0.5; } return v; }
+
+vec3 sGrid(vec2 uv, float asp, float t){
+  float hz = 0.42; vec3 col = vec3(0.0);
+  vec2 sp = vec2((uv.x - 0.5) * asp, uv.y - 0.6);
+  float sun = smoothstep(0.24, 0.225, length(sp));
+  if (uv.y < 0.6) sun *= step(0.0, sin(uv.y * 110.0 - t * 1.5) + (uv.y - 0.42) * 9.0);
+  col += mix(u_c1, u_c2, clamp((uv.y - 0.4) * 3.0, 0.0, 1.0)) * sun;
+  col += u_c1 * exp(-abs(uv.y - hz) * 14.0) * 0.9 + u_c2 * exp(-abs(uv.y - hz) * 60.0) * 0.6;
+  if (uv.y < hz) {
+    float d = hz - uv.y, z = 0.3 / (d + 0.002);
+    float gz = fract(z - t * 1.2), gx = fract((uv.x - 0.5) * asp * z * 1.1);
+    float w = min(0.5, 0.02 * z);
+    float l = max(1.0 - smoothstep(0.0, w, min(gz, 1.0 - gz)), 1.0 - smoothstep(0.0, w, min(gx, 1.0 - gx)));
+    col += mix(u_c1, u_c2, 0.4) * l * smoothstep(0.0, 0.2, d) * 1.3;
+  }
+  return col;
+}
+vec3 sRain(vec2 uv, float asp, float t){
+  vec3 col = u_c0 * 0.6 * (1.0 - uv.y) + u_c1 * 0.12;
+  for (int i = 0; i < 3; i++) {
+    float fi = float(i);
+    vec2 g = uv * vec2(asp, 1.0) * (3.0 + fi * 2.5) + vec2(fi * 7.3, t * 0.03);
+    vec2 id = floor(g), f = fract(g) - 0.5;
+    float h = hash(id + fi);
+    vec2 o = (vec2(hash(id + 3.1), hash(id + 5.7)) - 0.5) * 0.6;
+    float r = 0.12 + 0.18 * h;
+    col += mix(u_c1, u_c2, hash(id + 9.0)) * smoothstep(r, r * 0.4, length(f - o)) * step(0.6, h) * (0.35 + 0.2 * sin(t + h * 6.28));
+  }
+  for (int i = 0; i < 3; i++) {
+    float fi = float(i), sc = 50.0 + fi * 35.0;
+    float cx = floor(uv.x * asp * sc), h = hash(vec2(cx, fi));
+    float y = fract(uv.y * (1.2 + fi * 0.5) + t * (1.2 + h) * (1.0 + fi * 0.5) + h * 10.0);
+    float streak = smoothstep(0.0, 0.015, y) * smoothstep(0.14, 0.0, y);
+    float thin = pow(max(0.0, 1.0 - abs(fract(uv.x * asp * sc) - 0.5) * 2.0), 6.0);
+    col += u_c2 * streak * thin * step(0.55, h) * (0.9 - fi * 0.2);
+  }
+  return col;
+}
+vec3 sNebula(vec2 uv, float asp, float t){
+  vec2 p = (uv - 0.5) * vec2(asp, 1.0) * 2.4;
+  float n = fbm(p + vec2(t * 0.06, t * 0.02) + fbm(p * 1.4 - t * 0.04));
+  float n2 = fbm(p * 2.1 + n * 1.6 + t * 0.05);
+  vec3 col = mix(u_c0, u_c1, smoothstep(0.3, 0.8, n));
+  col = mix(col, u_c2, smoothstep(0.55, 0.95, n2) * 0.85) * smoothstep(0.22, 0.85, n) * 1.4;
+  vec2 sg = uv * vec2(asp, 1.0) * 140.0; vec2 sid = floor(sg); float sh = hash(sid);
+  col += vec3(step(0.986, sh) * smoothstep(0.4, 0.0, length(fract(sg) - 0.5)) * (0.55 + 0.45 * sin(t * 3.0 + sh * 40.0)));
+  return col;
+}
+vec3 sSmoke(vec2 uv, float asp, float t){
+  vec2 p = uv * vec2(asp, 1.0) * 1.8;
+  float n = fbm(p + vec2(0.0, -t * 0.18) + 0.7 * fbm(p * 2.0 + vec2(t * 0.08, 0.0)));
+  vec3 col = mix(u_c0, u_c1, n) * smoothstep(0.2, 0.9, n) + u_c2 * pow(n, 4.0) * 1.1;
+  float shaft = pow(max(0.0, sin(uv.x * asp * 5.0 + uv.y * 2.2 + n * 2.5)), 10.0) * uv.y * 0.6;
+  return col + u_c2 * shaft;
+}
+vec3 sAurora(vec2 uv, float asp, float t){
+  vec3 col = u_c0 * 0.4;
+  for (int i = 0; i < 3; i++) {
+    float fi = float(i), x = uv.x * asp * (1.1 + fi * 0.45) + t * 0.12 * (1.0 + fi);
+    float c = 0.58 + 0.13 * sin(x * 1.6 + fi * 2.1) + 0.12 * (noise(vec2(x * 1.2, t * 0.25 + fi)) - 0.5);
+    float dy = uv.y - c;
+    float band = exp(-dy * dy * (90.0 + fi * 30.0)) + exp(-max(0.0, -dy) * 4.0) * step(dy, 0.0) * 0.35;
+    float rays = 0.55 + 0.45 * noise(vec2(uv.x * asp * 28.0 + fi * 5.0, t * 0.6));
+    col += mix(u_c1, u_c2, fi * 0.5) * band * rays * 0.75;
+  }
+  return col;
+}
+vec3 sEmbers(vec2 uv, float asp, float t){
+  vec3 col = u_c1 * 0.45 * pow(1.0 - uv.y, 2.5) + u_c0 * 0.3;
+  for (int i = 0; i < 3; i++) {
+    float fi = float(i), sc = 7.0 + fi * 6.0;
+    vec2 p = uv * vec2(asp, 1.0) * sc;
+    p.y -= t * (1.1 + fi * 0.6);
+    p.x += sin(p.y * 0.8 + fi * 3.0 + t * 0.7) * 0.35;
+    vec2 id = floor(p), f = fract(p) - 0.5;
+    float h = hash(id + fi * 13.0);
+    vec2 o = (vec2(hash(id + 1.7), hash(id + 4.2)) - 0.5) * 0.7;
+    float e = smoothstep(0.09 - fi * 0.02, 0.0, length(f - o)) * step(0.68, h);
+    col += mix(u_c2, u_c1, h) * e * (0.6 + 0.4 * sin(t * 9.0 + h * 30.0)) * (1.6 - uv.y) * 1.6;
+  }
+  return col;
+}
+vec3 styleColor(float s, vec2 uv, float asp, float t){
+  if (s < 0.5) return sGrid(uv, asp, t);
+  if (s < 1.5) return sRain(uv, asp, t);
+  if (s < 2.5) return sNebula(uv, asp, t);
+  if (s < 3.5) return sSmoke(uv, asp, t);
+  if (s < 4.5) return sAurora(uv, asp, t);
+  return sEmbers(uv, asp, t);
+}
+void main(){
+  vec2 uv = gl_FragCoord.xy / u_res; float asp = u_res.x / u_res.y;
+  vec3 col = styleColor(u_styleA, uv, asp, u_t);
+  if (u_mix > 0.0) col = mix(col, styleColor(u_styleB, uv, asp, u_t), smoothstep(0.0, 1.0, u_mix));
+  col *= (0.3 + 0.95 * u_intensity) * (1.0 + 0.3 * u_beat);
+  vec3 tint = u_warmth > 0.0 ? vec3(1.18, 0.95, 0.72) : vec3(0.72, 0.92, 1.22);
+  col *= mix(vec3(1.0), tint, abs(u_warmth) * 0.6);
+  vec2 q = uv - 0.5; col *= 1.0 - dot(q, q) * 1.1;
+  col += (hash(gl_FragCoord.xy + fract(u_time * 7.0) * 311.0) - 0.5) * u_grain * 0.14;
+  gl_FragColor = vec4(max(col, 0.0), 1.0);
+}`;
+
+const fx = { gl: null, prog: null, u: {} };
+function initGL() {
+  const canvas = $("#fx");
+  const gl = canvas.getContext("webgl", { antialias: false, premultipliedAlpha: false, powerPreference: "high-performance" });
+  if (!gl) return false;
+  const sh = (type, src) => { const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s);
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s)); return s; };
+  const prog = gl.createProgram();
+  gl.attachShader(prog, sh(gl.VERTEX_SHADER, "attribute vec2 p; void main(){ gl_Position = vec4(p, 0.0, 1.0); }"));
+  gl.attachShader(prog, sh(gl.FRAGMENT_SHADER, FRAG));
+  gl.linkProgram(prog);
+  if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(prog));
+  gl.useProgram(prog);
+  const buf = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 3,-1, -1,3]), gl.STATIC_DRAW);
+  const loc = gl.getAttribLocation(prog, "p"); gl.enableVertexAttribArray(loc); gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+  for (const n of ["u_res","u_t","u_time","u_intensity","u_warmth","u_beat","u_grain","u_styleA","u_styleB","u_mix","u_c0","u_c1","u_c2"])
+    fx.u[n] = gl.getUniformLocation(prog, n);
+  Object.assign(fx, { gl, prog });
+  canvas.addEventListener("webglcontextlost", e => { e.preventDefault(); fx.gl = null; });  // backdrop stays visible
+  return true;
+}
+const RENDER_SCALE = 0.6;
+function resize() {
+  for (const c of [$("#fx"), $("#ghost")]) {
+    const s = c.id === "fx" ? RENDER_SCALE * Math.min(devicePixelRatio || 1, 1.5) : 1;
+    c.width = Math.max(1, Math.round(innerWidth * s)); c.height = Math.max(1, Math.round(innerHeight * s));
+  }
+  if (fx.gl) fx.gl.viewport(0, 0, $("#fx").width, $("#fx").height);
+}
+
+let lastFrame = performance.now();
+function frame(now) {
+  const dt = Math.min(0.5, (now - lastFrame) / 1000); lastFrame = now;
+  ease(dt);
+  const gl = fx.gl;
+  if (gl) {
+    const u = fx.u, c = $("#fx");
+    gl.uniform2f(u.u_res, c.width, c.height);
+    gl.uniform1f(u.u_t, phaseT); gl.uniform1f(u.u_time, now / 1000);
+    gl.uniform1f(u.u_intensity, cur.intensity); gl.uniform1f(u.u_warmth, cur.warmth);
+    gl.uniform1f(u.u_beat, cur.bpm > 1 ? Math.pow(1 - (beatPhase % 1), 3) * Math.min(1, cur.bpm / 40) : 0);
+    gl.uniform1f(u.u_grain, cur.grain);
+    gl.uniform1f(u.u_styleA, style.a); gl.uniform1f(u.u_styleB, style.b); gl.uniform1f(u.u_mix, style.mix);
+    gl.uniform3fv(u.u_c0, cur.c[0]); gl.uniform3fv(u.u_c1, cur.c[1]); gl.uniform3fv(u.u_c2, cur.c[2]);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+  }
+  requestAnimationFrame(frame);
+}
+
+// ---------------------------------------------------------------- backdrop crossfade
+let bdFront = 0;
+function setBackdrop(url) {
+  if (!url) return;
+  const img = new Image();
+  img.onload = () => {
+    const layers = document.querySelectorAll(".bd");
+    const next = layers[1 - bdFront];
+    next.style.backgroundImage = `url("${url}")`;
+    next.classList.add("on"); layers[bdFront].classList.remove("on");
+    bdFront = 1 - bdFront;
+  };
+  img.src = url;  // on error: keep the current backdrop
+}
+
+// ---------------------------------------------------------------- HUD helpers
+function $(s) { return document.querySelector(s); }
+function escapeHtml(s) { return String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
+const LABELS = { ready: "ready", listening: "listening…", transcribing: "transcribing…", thinking: "shaping the scene…",
+  error: "hiccup", limited: "slow down", offline: "reconnecting…" };
+let statusTimer = null;
+function setStatus(state, detail) {
+  const el = $("#status");
+  el.dataset.state = state;
+  el.querySelector(".text").textContent = detail || LABELS[state] || state;
+  clearTimeout(statusTimer);
+  if (state === "error" || state === "limited" || (state === "ready" && detail))
+    statusTimer = setTimeout(() => setStatus("ready"), 5000);
+}
+let captionTimer = null;
+function setCaption(text, partial) {
+  const el = $("#caption");
+  el.textContent = text; el.classList.toggle("partial", !!partial); el.classList.add("show");
+  clearTimeout(captionTimer);
+  captionTimer = setTimeout(() => el.classList.remove("show"), partial ? 8000 : 6000);
+}
+const timing = { release: 0, final: 0 };
+function showTiming(sceneAt) {
+  const parts = [];
+  if (timing.release && timing.final) parts.push(`voice ${((timing.final - timing.release) / 1000).toFixed(2)}s`);
+  const from = timing.final || timing.release;
+  if (from) parts.push(`scene ${((sceneAt - from) / 1000).toFixed(2)}s`);
+  $("#timing").textContent = parts.join(" · ");
+}
+
+// ---------------------------------------------------------------- stage socket
+let ws = null, wsDelay = 1000;
+function connect() {
+  ws = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws/stage`);
+  ws.binaryType = "arraybuffer";
+  ws.onopen = () => { wsDelay = 1000; setStatus("ready"); };
+  ws.onclose = () => { setStatus("offline"); setTimeout(connect, wsDelay); wsDelay = Math.min(wsDelay * 2, 10000); };
+  ws.onmessage = e => {
+    let m; try { m = JSON.parse(e.data); } catch { return; }
+    if (m.type === "hello") {
+      $("#status .mode").textContent = m.mode;
+      applyScene(m.scene); setBackdrop(m.backdrop);
+    } else if (m.type === "status") {
+      setStatus(m.state, m.detail);
+    } else if (m.type === "transcript") {
+      if (m.final) timing.final = performance.now();
+      setCaption(m.text, !m.final);
+    } else if (m.type === "scene") {
+      applyScene(m.scene); setBackdrop(m.backdrop); showTiming(performance.now());
+      timing.release = timing.final = 0;
+    } else if (m.type === "backdrop") {
+      setBackdrop(m.url);
+    }
+  };
+}
+const wsSend = data => { if (ws && ws.readyState === 1) ws.send(data); };
+
+// ---------------------------------------------------------------- mic → 24 kHz s16 PCM (AudioWorklet)
+const WORKLET = `
+class Pcm24k extends AudioWorkletProcessor {
+  constructor() {
+    super();
+    this.ratio = sampleRate / 24000; this.pos = 0; this.prev = 0; this.on = false;
+    this.buf = new Int16Array(1920); this.n = 0;  // 80 ms chunks
+    this.port.onmessage = e => {
+      if (e.data === "on") { this.on = true; this.pos = 0; this.n = 0; }
+      else if (e.data === "off") { this.on = false; this.flush(); this.port.postMessage("done"); }
+    };
+  }
+  push(v) {
+    v = Math.max(-1, Math.min(1, v));
+    this.buf[this.n++] = v < 0 ? v * 0x8000 : v * 0x7fff;
+    if (this.n === this.buf.length) this.flush();
+  }
+  flush() {
+    if (this.n > 0) { const out = this.buf.slice(0, this.n); this.port.postMessage(out.buffer, [out.buffer]); this.n = 0; }
+  }
+  process(inputs) {
+    const ch = inputs[0] && inputs[0][0];
+    if (!ch) return true;
+    if (this.on) {
+      // Linear-interpolation resample; pos is in input samples relative to this block (may start in [-1, 0)).
+      let i = this.pos;
+      while (true) {
+        const i0 = Math.floor(i), i1 = i0 + 1;
+        if (i1 >= ch.length) break;
+        const s0 = i0 < 0 ? this.prev : ch[i0];
+        this.push(s0 + (ch[i1] - s0) * (i - i0));
+        i += this.ratio;
+      }
+      this.pos = i - ch.length;
+    }
+    this.prev = ch[ch.length - 1];
+    return true;
+  }
+}
+registerProcessor("pcm24k", Pcm24k);`;
+
+const mic = { ctx: null, node: null, ready: false, talking: false, releasing: false };
+async function initMic() {
+  if (mic.ready) return true;
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true } });
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    await ctx.audioWorklet.addModule(URL.createObjectURL(new Blob([WORKLET], { type: "application/javascript" })));
+    const node = new AudioWorkletNode(ctx, "pcm24k", { numberOfInputs: 1, numberOfOutputs: 1 });
+    const mute = ctx.createGain(); mute.gain.value = 0;
+    ctx.createMediaStreamSource(stream).connect(node).connect(mute).connect(ctx.destination);
+    node.port.onmessage = e => {
+      if (e.data === "done") { wsSend(JSON.stringify({ type: "ptt_end" })); mic.releasing = false; }
+      else if (e.data instanceof ArrayBuffer) wsSend(e.data);
+    };
+    Object.assign(mic, { ctx, node, ready: true });
+    return true;
+  } catch (err) {
+    console.warn("mic unavailable", err);
+    setStatus("error", "Mic unavailable. Type a cue instead.");
+    return false;
+  }
+}
+async function pttDown() {
+  if (mic.talking || mic.releasing) return;
+  if (!mic.ready && !(await initMic())) return;
+  if (mic.ctx.state === "suspended") await mic.ctx.resume();
+  mic.talking = true;
+  $("#ptt").classList.add("active"); $("#ptt").textContent = "Listening…";
+  wsSend(JSON.stringify({ type: "ptt_start" }));
+  mic.node.port.postMessage("on");
+}
+function pttUp() {
+  if (!mic.talking) return;
+  mic.talking = false; mic.releasing = true;
+  $("#ptt").classList.remove("active"); $("#ptt").textContent = "Hold to speak";
+  timing.release = performance.now(); timing.final = 0;
+  setTimeout(() => mic.node.port.postMessage("off"), 200);  // short tail so the last word isn't clipped
+}
+
+// ---------------------------------------------------------------- input wiring
+function wireInput() {
+  const btn = $("#ptt");
+  btn.addEventListener("pointerdown", e => { e.preventDefault(); btn.setPointerCapture(e.pointerId); pttDown(); });
+  for (const ev of ["pointerup", "pointercancel"]) btn.addEventListener(ev, pttUp);
+  btn.addEventListener("contextmenu", e => e.preventDefault());
+  const typing = () => document.activeElement === $("#cue");
+  addEventListener("keydown", e => {
+    if (typing()) return;
+    if (e.code === "Space") { e.preventDefault(); if (!e.repeat) pttDown(); }
+    else if (e.key === "h" || e.key === "H") $("#hud").classList.toggle("hidden");
+  });
+  addEventListener("keyup", e => { if (e.code === "Space" && !typing()) { e.preventDefault(); pttUp(); } });
+  addEventListener("blur", pttUp);
+  $("#cue").addEventListener("keydown", e => {
+    if (e.key === "Enter") {
+      const text = e.target.value.trim();
+      if (text) { wsSend(JSON.stringify({ type: "text_cue", text })); setCaption(text, false); timing.release = performance.now(); timing.final = 0; }
+      e.target.value = ""; e.target.blur();
+    } else if (e.key === "Escape") e.target.blur();
+  });
+}
+
+// ---------------------------------------------------------------- boot
+try { initGL(); } catch (err) { console.warn("WebGL unavailable; backdrop-only mode", err); fx.gl = null; }
+resize(); addEventListener("resize", resize);
+requestAnimationFrame(frame);
+wireInput();
+connect();
+$("#go").addEventListener("click", async () => {
+  $("#start").remove();
+  await initMic();   // ask for the mic now, so the first push-to-talk isn't lost to the permission prompt
+});
+</script>
+</body>
+</html>
