@@ -15,6 +15,6 @@ services:
       - key: MOCK
         value: "0"
       - key: DAILY_BUDGET_USD
-        value: "8"
+        value: "5"
       - key: PERFORM_SECONDS_PER_IP
         value: "180"

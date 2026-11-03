@@ -48,7 +48,7 @@ PRICE_SPARK_OUT = 4.25 / 1_000_000
 PRICE_IMAGE = 0.01
 PRICE_SAM = 2.50 / 1000
 
-DAILY_BUDGET_USD = float(os.environ.get("DAILY_BUDGET_USD", "8"))
+DAILY_BUDGET_USD = float(os.environ.get("DAILY_BUDGET_USD", "5"))
 
 # Per-IP limits: (capacity, refill seconds per token)
 LIMIT_CUES = (6, 10.0)        # 6 burst, then 1 per 10 s
