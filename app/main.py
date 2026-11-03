@@ -1,0 +1,247 @@
+"""Afterglow server: static page, health, backdrops, and the /ws/stage cue loop."""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import time
+import uuid
+from collections import OrderedDict
+
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.staticfiles import StaticFiles
+
+from . import backends, config
+from .backends import BackendError
+from .limits import limits
+from .backends.mock import RELATIVE_WORDS
+from .scene import DEFAULT_SCENE, Scene, bank_scene, match_bank
+from .telemetry import log_event, log_stage, summary
+
+app = FastAPI(title="Afterglow", docs_url=None, redoc_url=None)
+config.BANK_DIR.mkdir(parents=True, exist_ok=True)
+app.mount("/backdrops", StaticFiles(directory=config.BANK_DIR), name="backdrops")
+
+MAX_UTTERANCE_BYTES = 30 * 48000  # 30 s of 24 kHz s16 mono
+MAX_FRAME_BYTES = 64 * 1024
+EST_ASR = 0.002
+EST_SPARK = 0.003
+
+_generated: OrderedDict[str, bytes] = OrderedDict()  # generated backdrops, newest last
+_GENERATED_MAX = 40
+
+
+def client_ip(headers, client) -> str:
+    fwd = headers.get("x-forwarded-for")
+    if fwd:
+        return fwd.split(",")[0].strip()
+    return client.host if client else "unknown"
+
+
+def bank_url(scene: Scene) -> str:
+    return f"/backdrops/{scene.nearest_backdrop}.webp"
+
+
+@app.get("/")
+async def index():
+    return FileResponse(config.STATIC_DIR / "index.html", headers={"Cache-Control": "no-cache"})
+
+
+@app.get("/api/health")
+async def health():
+    return JSONResponse({
+        "mode": "mock" if config.MOCK else "live",
+        "asr_strategy": config.ASR_STRATEGY,
+        "budget": limits.status(),
+        "latency": summary(),
+    })
+
+
+@app.get("/api/backdrop/{bid}")
+async def generated_backdrop(bid: str):
+    data = _generated.get(bid)
+    if data is None:
+        return Response(status_code=404)
+    return Response(data, media_type="image/webp", headers={"Cache-Control": "public, max-age=86400"})
+
+
+class Stage:
+    """One browser connection: push-to-talk audio in, transcripts/scenes/backdrops out."""
+
+    def __init__(self, ws: WebSocket, ip: str):
+        self.ws, self.ip = ws, ip
+        self.scene: Scene = DEFAULT_SCENE
+        self.asr = None
+        self.asr_bytes = 0
+        self.cue_seq = 0
+        self._send_lock = asyncio.Lock()
+        self._tasks: set[asyncio.Task] = set()
+
+    def spawn(self, coro) -> None:
+        t = asyncio.create_task(coro)
+        self._tasks.add(t)
+        t.add_done_callback(self._tasks.discard)
+
+    async def send(self, **msg) -> None:
+        async with self._send_lock:
+            try:
+                await self.ws.send_text(json.dumps(msg))
+            except Exception:
+                pass  # client gone; the receive loop will notice
+
+    async def status(self, state: str, detail: str = "") -> None:
+        await self.send(type="status", state=state, detail=detail)
+
+    async def run(self) -> None:
+        await self.send(type="hello", mode="mock" if config.MOCK else "live",
+                        scene=self.scene.model_dump(), backdrop=bank_url(self.scene))
+        try:
+            while True:
+                msg = await self.ws.receive()
+                if msg["type"] == "websocket.disconnect":
+                    break
+                if msg.get("bytes") is not None:
+                    self.on_audio(msg["bytes"])
+                elif msg.get("text") is not None:
+                    await self.on_control(msg["text"])
+        except (WebSocketDisconnect, RuntimeError):
+            pass
+        finally:
+            if self.asr:
+                await self.asr.close()
+            for t in list(self._tasks):
+                t.cancel()
+
+    def on_audio(self, frame: bytes) -> None:
+        if not self.asr or len(frame) > MAX_FRAME_BYTES:
+            return
+        if self.asr_bytes + len(frame) > MAX_UTTERANCE_BYTES:
+            self.spawn(self.end_ptt())  # runaway mic: close the utterance
+            return
+        self.asr_bytes += len(frame)
+        self.asr.send_audio(frame)
+
+    async def on_control(self, raw: str) -> None:
+        try:
+            m = json.loads(raw)
+        except ValueError:
+            return
+        kind = m.get("type")
+        if kind == "ptt_start":
+            await self.start_ptt()
+        elif kind == "ptt_end":
+            self.spawn(self.end_ptt())
+        elif kind == "text_cue":
+            text = str(m.get("text", "")).strip()[:300]
+            if text:
+                if not limits.allow(self.ip, "cue"):
+                    await self.status("limited", "Too many cues; wait a few seconds.")
+                    return
+                self.spawn(self.handle_cue(text, time.perf_counter(), via="text"))
+
+    async def start_ptt(self) -> None:
+        if self.asr:
+            await self.asr.close()
+            self.asr = None
+        if not limits.allow(self.ip, "cue"):
+            await self.status("limited", "Too many cues; wait a few seconds.")
+            return
+        live = not config.MOCK and limits.can_spend(EST_ASR)
+        if not config.MOCK and not live:
+            await self.status("limited", "Voice paused: daily budget reached. Type a cue instead.")
+            return
+
+        async def on_partial(text: str) -> None:
+            await self.send(type="transcript", final=False, text=text)
+
+        self.asr = backends.asr_session(on_partial, live)
+        self.asr_bytes = 0
+        try:
+            await self.asr.start()
+        except Exception as e:  # never let a connect error kill the socket
+            log_stage("asr_start", None, False, self.asr.name, error=type(e).__name__)
+            self.asr = None
+            await self.status("error", "Voice service unavailable; type a cue instead.")
+            return
+        await self.status("listening")
+
+    async def end_ptt(self) -> None:
+        asr, self.asr = self.asr, None
+        if asr is None:
+            return
+        t_release = time.perf_counter()
+        await self.status("transcribing")
+        try:
+            text = await asr.finish()
+        except BackendError as e:
+            log_event("asr_failed", detail=str(e)[:200])
+            await self.status("error", "Didn't catch that. Keeping the current scene.")
+            return
+        finally:
+            self.spawn(asr.close())
+        if not text:
+            await self.status("ready", "Heard nothing.")
+            return
+        await self.send(type="transcript", final=True, text=text)
+        await self.handle_cue(text, t_release, via="voice")
+
+    async def handle_cue(self, text: str, t0: float, via: str) -> None:
+        self.cue_seq += 1
+        seq = self.cue_seq
+        # Instant keyword guess so the stage reacts within ~0.5 s; Spark's scene refines it.
+        guess_id, score = match_bank(text, ignore=RELATIVE_WORDS)
+        if score and guess_id != self.scene.nearest_backdrop:
+            guess = bank_scene(guess_id)
+            await self.send(type="scene", scene=guess.model_dump(), backdrop=bank_url(guess),
+                            source="instant", cue=text)
+            log_stage("cue_to_instant", (time.perf_counter() - t0) * 1000, True, "keywords", via=via)
+        await self.status("thinking")
+        live = not config.MOCK and limits.can_spend(EST_SPARK)
+        model = backends.scene_model(live)
+        try:
+            result = await asyncio.wait_for(model.make_scene(text, self.scene), config.TIMEOUT_SPARK * 2 + 2)
+        except (BackendError, asyncio.TimeoutError) as e:
+            log_event("scene_failed", detail=str(e)[:200] or type(e).__name__)
+            await self.status("error", "Scene update failed. Keeping the current scene.")
+            return
+        if seq != self.cue_seq:
+            return  # a newer cue superseded this one
+        self.scene = result.scene
+        await self.send(type="scene", scene=self.scene.model_dump(), backdrop=bank_url(self.scene),
+                        source=model.name, cue=text)
+        log_stage("cue_to_scene", (time.perf_counter() - t0) * 1000, True, model.name, via=via)
+        await self.status("ready", "" if live or config.MOCK else "Offline mode: daily budget reached.")
+        self.spawn(self.generate_backdrop(self.scene, seq))
+
+    async def generate_backdrop(self, scene: Scene, seq: int) -> None:
+        if not limits.allow(self.ip, "image"):
+            return  # bank image stays; a fresh one comes with a later cue
+        live = not config.MOCK and limits.can_spend(config.PRICE_IMAGE)
+        if not config.MOCK and not live:
+            return
+        try:
+            data = await backends.image_model(live).generate(scene.backdrop_prompt)
+        except BackendError:
+            return  # keep bank image
+        if not data:
+            return
+        if live:
+            limits.charge("image", config.PRICE_IMAGE)
+        bid = uuid.uuid4().hex[:12]
+        _generated[bid] = data
+        while len(_generated) > _GENERATED_MAX:
+            _generated.popitem(last=False)
+        if seq == self.cue_seq:
+            await self.send(type="backdrop", url=f"/api/backdrop/{bid}", generated=True)
+
+
+@app.websocket("/ws/stage")
+async def ws_stage(ws: WebSocket):
+    await ws.accept()
+    ip = client_ip(ws.headers, ws.client)
+    log_event("stage_connect", mode="mock" if config.MOCK else "live")
+    await Stage(ws, ip).run()
+
+
+app.mount("/static", StaticFiles(directory=config.STATIC_DIR), name="static")
