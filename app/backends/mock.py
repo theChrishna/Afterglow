@@ -102,7 +102,7 @@ class MockSegmenter:
 
     name = "mock"
 
-    async def segment(self, jpeg: bytes, frame_w: int, frame_h: int) -> dict | None:
+    async def segment(self, jpeg: bytes, frame_w: int, frame_h: int, as_png: bool = False) -> dict | None:
         import base64
         import io
         import math
@@ -121,9 +121,15 @@ class MockSegmenter:
         d.ellipse([w / 2 - head / 2, h * 0.04, w / 2 + head / 2, h * 0.04 + head * 1.2], fill=255)
         d.rounded_rectangle([w * 0.42, h * 0.04 + head * 1.1, w * 0.58, h * 0.32], radius=6, fill=255)
         d.rounded_rectangle([w * 0.05, h * 0.3, w * 0.95, h * 1.2], radius=int(w * 0.25), fill=255)
-        la = Image.merge("LA", (Image.new("L", (w, h), 255), alpha))
-        out = io.BytesIO()
-        la.save(out, "PNG")
         log_stage("sam", (time.perf_counter() - t0) * 1000, True, self.name)
-        return {"png": base64.b64encode(out.getvalue()).decode(), "bounds": [left, top, left + w, top + h],
-                "frame": [frame_w, frame_h], "confidence": 1.0, "objects": 1, "decode_ms": 0.0, "raster": [w, h]}
+        out = {"bounds": [left, top, left + w, top + h], "frame": [frame_w, frame_h],
+               "confidence": 1.0, "objects": 1, "raster": [w, h]}
+        raster = alpha.point(lambda v: 1 if v else 0).tobytes()
+        if as_png:
+            from ..sam_mask import mask_png
+            out["png"] = base64.b64encode(mask_png(raster, w, h)).decode()
+        else:
+            # Same wire format SAM returns, so the browser decoder path is exercised offline too.
+            from meta_sam_parser._mask_codec import _encode_raster
+            out["mask"] = {"encoding": "one_bit", "payload": _encode_raster(raster, w, h), "width": w, "height": h}
+        return out

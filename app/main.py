@@ -276,7 +276,8 @@ async def silhouette(request: Request):
     seg = backends.segmenter(live)
     t0 = time.perf_counter()
     try:
-        mask = await asyncio.wait_for(seg.segment(jpeg, fw, fh), config.TIMEOUT_SAM)
+        as_png = request.headers.get("x-mask-format") == "png"
+        mask = await asyncio.wait_for(seg.segment(jpeg, fw, fh, as_png), config.TIMEOUT_SAM)
     except (BackendError, asyncio.TimeoutError):
         return _sam_refusal("sam_failed", 502, ip, "Silhouette unavailable; keeping the last echo.")
     finally:

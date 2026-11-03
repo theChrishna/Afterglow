@@ -313,7 +313,7 @@ class MetaImageModel:
 class MetaSegmenter:
     name = "meta_api"
 
-    async def segment(self, jpeg: bytes, frame_w: int, frame_h: int) -> dict | None:
+    async def segment(self, jpeg: bytes, frame_w: int, frame_h: int, as_png: bool = False) -> dict | None:
         from ..sam_mask import main_subject
 
         body = {
@@ -340,10 +340,10 @@ class MetaSegmenter:
             c.get("text", "") for item in j.get("output", []) or [] for c in item.get("content", []) or []
             if c.get("type") == "output_text")
         try:
-            result = await asyncio.to_thread(main_subject, text, frame_w, frame_h)
+            result = await asyncio.to_thread(main_subject, text, frame_w, frame_h, as_png)
         except Exception as e:  # malformed output: treat as a failed frame, keep the last ghost
             log_stage("sam", ms, False, self.name, error=f"parse: {_err(e)}")
             raise BackendError("SAM parse failed") from e
         log_stage("sam", ms, True, self.name, matches=0 if result is None else result["objects"],
-                  decode_ms=None if result is None else result["decode_ms"])
+                  server_decode_ms=None if result is None else result.get("decode_ms"))
         return result

@@ -498,6 +498,15 @@ function pttUp() {
 // A frame goes to the server every ~3.5 s; the mask that comes back is seconds old, so it is
 // drawn as a deliberately delayed, rising, fading echo, never as live tracking.
 const FRAME_W = 640, FRAME_H = 360, CAPTURE_MS = 3500, GHOST_MAX = 6;
+// Meta's official SAM parser decodes the compact mask in the browser (pure-Python decoding is
+// seconds on a small server CPU). If the CDN can't be reached, the server decodes to PNG instead.
+const SAM_PARSER_URL = "https://cdn.jsdelivr.net/npm/@meta-sam/parser@0.1.0/dist/index.js";
+let samDecoder = null;
+function loadDecoder() {
+  if (!samDecoder) samDecoder = import(SAM_PARSER_URL).then(m => m.decodeMaskToRaster)
+    .catch(err => { console.warn("SAM parser unavailable; using server-side PNG masks", err); return null; });
+  return samDecoder;
+}
 const perf = { on: false, stream: null, timer: null, inflight: false, left: null, leftAt: 0, ghosts: [], mirror: true,
   cap: Object.assign(document.createElement("canvas"), { width: FRAME_W, height: FRAME_H }),
   scratch: document.createElement("canvas") };
@@ -521,6 +530,7 @@ async function performOn() {
     setStatus("error", "Camera unavailable."); return;
   }
   const v = $("#cam"); v.srcObject = perf.stream; await v.play().catch(() => {});
+  perf.decode = await loadDecoder();
   perf.on = true; perfButton();
   captureLoop();
 }
@@ -545,7 +555,9 @@ async function sendFrame() {
   perf.cap.getContext("2d").drawImage(v, (v.videoWidth - sw) / 2, (v.videoHeight - sh) / 2, sw, sh, 0, 0, FRAME_W, FRAME_H);
   try {
     const blob = await new Promise(r => perf.cap.toBlob(r, "image/jpeg", 0.7));
-    const res = await fetch("/api/silhouette", { method: "POST", headers: { "Content-Type": "image/jpeg" }, body: blob });
+    const headers = { "Content-Type": "image/jpeg" };
+    if (!perf.decode) headers["X-Mask-Format"] = "png";
+    const res = await fetch("/api/silhouette", { method: "POST", headers, body: blob });
     const j = await res.json().catch(() => ({}));
     if (typeof j.perform_left_s === "number") { perf.left = j.perform_left_s; perf.leftAt = performance.now(); }
     if (res.ok && j.mask) addGhost(j.mask, tCap);
@@ -557,16 +569,29 @@ async function sendFrame() {
     perf.inflight = false; perfButton();
   }
 }
-function addGhost(mask, tCap) {
-  const img = new Image();
-  img.onload = () => {
-    const now = performance.now();
-    perf.ghosts.push({ img, bounds: mask.bounds, frame: mask.frame, born: now });
-    if (perf.ghosts.length > GHOST_MAX) perf.ghosts.shift();
-    stage.echo = `${((now - tCap) / 1000).toFixed(1)}s behind`;
-    setProvenance(null, null);
-  };
-  img.src = "data:image/png;base64," + mask.png;
+function maskCanvas(raster, w, h) {
+  const c = Object.assign(document.createElement("canvas"), { width: w, height: h });
+  const ctx = c.getContext("2d"), id = ctx.createImageData(w, h), d = id.data;
+  for (let i = 0; i < raster.length; i++) { const o = i * 4; d[o] = d[o + 1] = d[o + 2] = 255; d[o + 3] = raster[i] ? 255 : 0; }
+  ctx.putImageData(id, 0, 0);
+  return c;
+}
+async function addGhost(res, tCap) {
+  let img;
+  try {
+    if (res.mask && perf.decode) {
+      const t = performance.now();
+      img = maskCanvas(perf.decode(res.mask), res.mask.width, res.mask.height);
+      perf.decodeMs = performance.now() - t;
+    } else if (res.png) {
+      img = new Image(); img.src = "data:image/png;base64," + res.png; await img.decode();
+    } else return;
+  } catch (err) { console.warn("mask decode failed", err); return; }   // keep the previous echo
+  const now = performance.now();
+  perf.ghosts.push({ img, bounds: res.bounds, frame: res.frame, born: now });
+  if (perf.ghosts.length > GHOST_MAX) perf.ghosts.shift();
+  stage.echo = `${((now - tCap) / 1000).toFixed(1)}s behind`;
+  setProvenance(null, null);
 }
 
 const rgb = (c, a) => `rgba(${Math.round(c[0] * 255)},${Math.round(c[1] * 255)},${Math.round(c[2] * 255)},${a})`;

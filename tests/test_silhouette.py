@@ -22,9 +22,29 @@ def test_mock_silhouette_then_rate_limited():
         assert r.status_code == 200
         m = r.json()["mask"]
         assert m["frame"] == [640, 360] and len(m["bounds"]) == 4
-        assert Image.open(io.BytesIO(base64.b64decode(m["png"]))).mode == "LA"
+        assert m["mask"]["encoding"] == "one_bit" and m["mask"]["payload"].startswith("!")
         r2 = c.post("/api/silhouette", content=_jpeg(), headers=hdr)
         assert r2.status_code == 429 and r2.json()["error"] == "too_fast"
+
+
+def test_png_fallback_format():
+    with TestClient(app) as c:
+        r = c.post("/api/silhouette", content=_jpeg(),
+                   headers={"Content-Type": "image/jpeg", "x-forwarded-for": "10.0.0.4", "x-mask-format": "png"})
+        m = r.json()["mask"]
+        assert Image.open(io.BytesIO(base64.b64decode(m["png"]))).mode == "LA" and "mask" not in m
+
+
+def test_mock_wire_mask_decodes_like_sam():
+    import asyncio
+    from meta_sam_parser import decode_mask_to_raster
+    from meta_sam_parser._types import SegmentationMask
+    from app.backends.mock import MockSegmenter
+    out = asyncio.run(MockSegmenter().segment(_jpeg(), 640, 360))
+    mk = out["mask"]
+    raster = decode_mask_to_raster(SegmentationMask(encoding="one_bit", payload=mk["payload"],
+                                                    width=mk["width"], height=mk["height"]))
+    assert len(raster) == mk["width"] * mk["height"] and 0 < sum(raster) < len(raster)
 
 
 def test_rejects_non_jpeg():
