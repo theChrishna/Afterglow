@@ -33,9 +33,14 @@ _GENERATED_MAX = 40
 
 
 def client_ip(headers, client) -> str:
+    """Real client IP behind Render's proxy. Never trust the first X-Forwarded-For entry:
+    clients can set it themselves; the proxy appends the real address at the end."""
+    for h in ("true-client-ip", "cf-connecting-ip"):
+        if headers.get(h):
+            return headers[h].strip()
     fwd = headers.get("x-forwarded-for")
     if fwd:
-        return fwd.split(",")[0].strip()
+        return fwd.split(",")[-1].strip()
     return client.host if client else "unknown"
 
 

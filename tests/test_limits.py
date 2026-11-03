@@ -28,3 +28,9 @@ def test_per_ip_buckets_are_separate():
         assert lim.allow("a", "cue")
     assert not lim.allow("a", "cue")
     assert lim.allow("b", "cue")
+
+
+def test_client_ip_ignores_spoofed_first_forwarded_entry():
+    from app.main import client_ip
+    assert client_ip({"x-forwarded-for": "6.6.6.6, 1.2.3.4"}, None) == "1.2.3.4"
+    assert client_ip({"true-client-ip": "9.9.9.9", "x-forwarded-for": "6.6.6.6"}, None) == "9.9.9.9"
