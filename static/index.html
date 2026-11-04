@@ -6,7 +6,7 @@
 <title>Afterglow</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Playfair+Display:ital,wght@1,600&family=Space+Grotesk:wght@500;700&family=Space+Mono:wght@700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Playfair+Display:ital,wght@1,600&family=Space+Grotesk:wght@500;700&family=Space+Mono:wght@700&family=Caveat:wght@500&family=Gaegu:wght@700&family=Shadows+Into+Light&family=Reenie+Beanie&family=Fraunces:ital,wght@1,600&display=swap" rel="stylesheet">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='12' fill='%236a2cff'/%3E%3Ccircle cx='16' cy='16' r='6' fill='%2333d1ff'/%3E%3C/svg%3E">
 <style>
   :root { --c0: #05010f; --c1: #6a2cff; --c2: #33d1ff; --ui: rgba(255,255,255,.9); --ui-dim: rgba(255,255,255,.62);
@@ -116,6 +116,23 @@
   #perform:disabled { opacity: .45; cursor: default; }
   /* Difference keeps the echo visible on dark and bright scenes alike (an inverted, glowing ghost). */
   #ghost { mix-blend-mode: difference; }
+  #ghost.neon { mix-blend-mode: screen; }
+  #backdrop { transition: filter 1.6s ease, opacity 1.2s ease; }
+  .room #backdrop { opacity: 0; }
+  /* Handwritten lyrics: follow the performer's head, letter by letter. */
+  #hand { position: absolute; left: 0; top: 0; z-index: 3; width: max-content; max-width: min(40vw, 440px); pointer-events: none; }
+  #hand .ph { font-size: clamp(26px, 3.6vw, 54px); line-height: 1.22; color: #fff4ff; transition: opacity .3s ease;
+    text-shadow: 0 0 3px rgba(255,240,255,.95), 0 0 12px rgba(255,150,215,.6), 0 0 28px rgba(231,77,158,.35); }
+  #hand .ph.out { position: absolute; left: 0; bottom: 0; width: 100%; opacity: 0; }
+  .f0 { font-family: "Caveat", cursive; font-weight: 500; } .f1 { font-family: "Gaegu", cursive; font-weight: 700; }
+  .f2 { font-family: "Shadows Into Light", cursive; } .f3 { font-family: "Reenie Beanie", cursive; font-size: 1.12em; }
+  .f4 { font-family: "Fraunces", Georgia, serif; font-style: italic; font-weight: 600; font-size: .86em; }
+  #hcur { position: absolute; border: 1px solid rgba(255,244,255,.85); display: none; }
+  #hxy { position: absolute; font: 9px/1 ui-monospace, Menlo, monospace; color: rgba(255,244,255,.8); white-space: nowrap; display: none; }
+  #leaders { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 3; display: none; }
+  #leaders line { stroke: rgba(255,244,255,.5); stroke-width: 1; }
+  .hud-on #hand.live #hcur, .hud-on #hand.live #hxy, .hud-on #leaders.live { display: block; }
+  #lookBtn { border-color: rgba(231,77,158,.5); }
   #lat { position: absolute; right: 12px; top: 12px; z-index: 9; display: none; padding: 8px 10px; border-radius: 8px; background: rgba(0,0,0,.6); color: #9f9; font: 11px/1.45 ui-monospace, Menlo, monospace; white-space: pre; pointer-events: none; }
   #lat.on { display: block; }
 
@@ -164,9 +181,13 @@
   #start button:hover { background: var(--accent); }
   #start small { display: block; margin-top: 14px; color: var(--ui-dim); }
   .kbd { display: inline-block; padding: 0 6px; border: 1px solid rgba(255,255,255,.35); border-radius: 4px; font-size: 12px; }
-  @media (max-width: 560px) { #mood { display: none; } .btn { padding: 0 12px; } #ptt { flex: 1 1 100%; }
-    #chips { bottom: calc(132px + env(safe-area-inset-bottom)); } #hint { bottom: calc(222px + env(safe-area-inset-bottom)); white-space: normal; text-align: center; width: calc(100% - 32px); }
-    #caption { bottom: calc(260px + env(safe-area-inset-bottom)); } #more { bottom: calc(176px + env(safe-area-inset-bottom)); max-height: calc(100% - 240px); } }
+  @media (max-width: 560px) { #mood { display: none; } .btn { padding: 0 10px; font-size: 11px; letter-spacing: .08em; } #ptt { flex: 1 1 100%; }
+    #controls { gap: 6px; }
+    #chips { bottom: calc(132px + env(safe-area-inset-bottom)); flex-wrap: nowrap; overflow-x: auto; justify-content: flex-start; scrollbar-width: none;
+      -webkit-mask-image: linear-gradient(90deg, #000 85%, transparent); mask-image: linear-gradient(90deg, #000 85%, transparent); }
+    #chips::-webkit-scrollbar { display: none; } .chipbtn { flex: none; }
+    #hint { bottom: calc(184px + env(safe-area-inset-bottom)); white-space: normal; text-align: center; width: calc(100% - 32px); }
+    #caption { bottom: calc(232px + env(safe-area-inset-bottom)); } #more { bottom: calc(176px + env(safe-area-inset-bottom)); max-height: calc(100% - 240px); } }
 </style>
 </head>
 <body>
@@ -191,6 +212,8 @@
       <button id="cReset" type="button">Reset</button> <button id="cDone" type="button">Done (C)</button>
     </div>
   </div>
+  <div id="hand" aria-live="polite"><div id="hcur"></div><div id="hxy"></div></div>
+  <svg id="leaders" aria-hidden="true"><line></line><line></line></svg>
   <div id="lyrics" data-anchor="center" title="Drag to place · double-click to follow you"></div>
   <div id="tint"></div>
   <div id="hud">
@@ -206,11 +229,13 @@
       <button class="chipbtn" data-cue="Take us into deep space, slow and floating">Space</button>
       <button class="chipbtn" data-cue="Now set everything on fire, fast and loud">Fire</button>
       <button class="chipbtn" data-cue="Drop us underwater, calm and blue">Ocean</button>
+      <button class="chipbtn alt" id="reelChip" type="button">Reel look</button>
       <button class="chipbtn alt" id="demoBtn" type="button">&#9654; Watch the demo</button>
     </div>
     <div id="controls">
       <button id="ptt" class="btn" aria-label="Hold to speak a command"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg><span>Hold to speak</span></button>
       <button id="lyricsBtn" class="btn" aria-pressed="false" title="Show everything you say or sing as lyrics (L)">Lyrics</button>
+      <button id="lookBtn" class="btn" type="button" aria-label="Look: Reel. Switch to Classic">Reel</button>
       <button id="modeBtn" class="btn" aria-pressed="false" title="Performance mode: Off / Composite / Projection (M)">Mode</button>
       <button id="perform" class="btn icon" aria-pressed="false" aria-label="Camera off. Turn on the camera (3 min per visitor)" title="Camera (P)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7h3l2-3h8l2 3h3v13H3z"/><circle cx="12" cy="13" r="4"/></svg></button>
       <button id="moreBtn" class="btn" aria-expanded="false" aria-controls="more">More</button>
@@ -226,7 +251,16 @@
         <label>Feather <input type="range" id="mFeather" min="0" max="12" value="3"> <span id="vFeather"></span></label>
         <div class="row" data-for="projection"><button class="btn" id="calBtn" type="button">Calibrate (C)</button></div>
       </div>
+      <h3>Look</h3>
+      <div class="row"><button class="btn" id="presetReel" type="button">Reel look</button><button class="btn" id="presetClassic" type="button">Classic</button></div>
+      <label>Background <select id="roomSel" aria-label="Background"><option value="1">Violet room</option><option value="0">Moods and backdrops</option></select></label>
+      <label>Echo <select id="echoSel" aria-label="Echo style"><option value="neon">Neon contour</option><option value="ghost">Ghost (classic)</option></select></label>
+      <label>Row side <select id="sideSel" aria-label="Neon row side"><option value="auto">Auto</option><option value="left">Left</option><option value="right">Right</option></select></label>
+      <label data-for="projection"><input type="checkbox" id="optLight"> Light on performer (Projection)</label>
       <h3>Lyrics</h3>
+      <label>Style <select id="lyricSel" aria-label="Lyric style"><option value="hand">Handwritten</option><option value="kinetic">Kinetic</option></select></label>
+      <label><input type="checkbox" id="optFollow" checked> Follow subject</label>
+      <label><input type="checkbox" id="optHud" checked> HUD details (cursor, x/y, lines)</label>
       <label>Effect <select id="effectSel" aria-label="Lyric effect"><option value="auto">Auto (matches scene)</option><option>rise</option><option>pop</option><option>neon</option><option>stamp</option><option>wave</option><option>type</option></select></label>
       <h3>Show</h3>
       <label><input type="checkbox" id="optInfo"> Stage info (which model made what)</label>
@@ -262,7 +296,7 @@ function applyScene(s) {
   tgt.c = s.palette.map(hexToRgb);
   tgt.intensity = s.lighting.intensity; tgt.warmth = s.lighting.warmth; tgt.bpm = s.lighting.pulse_bpm;
   tgt.speed = s.shader.speed; tgt.grain = s.shader.grain;
-  const idx = Math.max(0, STYLES.indexOf(s.shader.style));
+  const idx = look.room ? ROOM_STYLE : Math.max(0, STYLES.indexOf(s.shader.style));
   if (style.mix > 0) style.queued = idx;          // finish the running crossfade first
   else if (idx !== style.a) { style.b = idx; style.mix = 0.0001; }
   const root = document.documentElement.style;
@@ -272,7 +306,7 @@ function applyScene(s) {
   const tint = $("#tint");
   tint.style.backgroundColor = s.lighting.warmth >= 0 ? "#ff9a3c" : "#3c8cff";
   tint.style.opacity = (Math.abs(s.lighting.warmth) * 0.55).toFixed(2);
-  $("#mood").innerHTML = `<b>${escapeHtml(s.mood)}</b> · ${s.shader.style}${s.lighting.pulse_bpm > 0 ? ` · ${Math.round(s.lighting.pulse_bpm)} bpm` : ""}`;
+  $("#mood").innerHTML = `<b>${escapeHtml(s.mood)}</b> · ${look.room ? "violet room" : s.shader.style}${s.lighting.pulse_bpm > 0 ? ` · ${Math.round(s.lighting.pulse_bpm)} bpm` : ""}`;
 }
 
 function ease(dt) {
@@ -382,13 +416,25 @@ vec3 sEmbers(vec2 uv, float asp, float t){
   }
   return col;
 }
+vec3 sRoom(vec2 uv, float asp, float t){       // "Violet room": a lit wall, a brighter ceiling band, a pink floor strip
+  float y = uv.y;
+  vec3 col = mix(vec3(0.306, 0.125, 0.263), vec3(0.427, 0.169, 0.427), smoothstep(0.0, 0.42, y));   // floor #4e2043 → mid #6d2b6d
+  col = mix(col, vec3(0.486, 0.192, 0.541), smoothstep(0.42, 0.72, y));                            // upper #7c318a
+  col = mix(col, vec3(0.525, 0.169, 0.686), smoothstep(0.76, 0.86, y));                            // ceiling band #862baf
+  col += vec3(0.13, 0.06, 0.17) * exp(-pow((y - 0.80) * 50.0, 2.0)) + vec3(0.07, 0.03, 0.09) * exp(-pow((y - 0.765) * 140.0, 2.0));
+  col = mix(col, col * (0.6 + 0.8 * mix(u_c1, u_c2, y)), 0.22);                                    // the cue's palette tints the room
+  col *= 1.0 - 0.22 * pow(abs(uv.x - 0.5) * 2.0, 2.0);
+  col += vec3(0.906, 0.302, 0.620) * (exp(-y * 40.0) * 0.95 + exp(-y * 9.0) * 0.10);               // pink glow strip #e74d9e
+  return col * (1.3 + 0.08 * sin(u_time * 0.8));                                                   // slow breathing
+}
 vec3 styleColor(float s, vec2 uv, float asp, float t){
   if (s < 0.5) return sGrid(uv, asp, t);
   if (s < 1.5) return sRain(uv, asp, t);
   if (s < 2.5) return sNebula(uv, asp, t);
   if (s < 3.5) return sSmoke(uv, asp, t);
   if (s < 4.5) return sAurora(uv, asp, t);
-  return sEmbers(uv, asp, t);
+  if (s < 5.5) return sEmbers(uv, asp, t);
+  return sRoom(uv, asp, t);
 }
 void main(){
   vec2 uv = gl_FragCoord.xy / u_res; float asp = u_res.x / u_res.y;
@@ -453,7 +499,7 @@ function frame(now) {
   updateLatHud(now);
   drawComp(now);
   drawGhosts(now, dt);
-  placeLyrics(dt);
+  if (look.lyrics === "hand") handTick(now, dt); else placeLyrics(dt);
   requestAnimationFrame(frame);
 }
 
@@ -484,6 +530,7 @@ function humanize(d) {
     : /lyrics/i.test(d) ? "Live budget used up, lyrics paused" : /ghost|perform/i.test(d) ? "Live budget used up, snapshots paused"
     : "Live budget used up, using offline moods";
   if (/too many cues/i.test(d)) return "Lots of cues at once. Give it a few seconds";
+  if (/perform mode is limited/i.test(d)) return "Snapshot time used up for today; the live echo keeps going";
   return d;
 }
 let statusTimer = null;
@@ -659,7 +706,7 @@ async function pttDown() {
   if (mic.ctx.state === "suspended") await mic.ctx.resume();
   mic.talking = true;
   $("#ptt").classList.add("active"); $("#ptt span").textContent = "Listening…"; demoStop();
-  wsSend(JSON.stringify({ type: "ptt_start" }));
+  wsSend(JSON.stringify({ type: "ptt_start", no_backdrop: look.room }));
   micRun();
 }
 function pttUp() {
@@ -710,6 +757,7 @@ function setLyricsState(on) {
 }
 function onLyric(text, done) {
   if (!ly.on) return;
+  if (look.lyrics === "hand") { handLyric(text, done); ly.lastAt = performance.now(); return; }
   const words = text.split(/\s+/).filter(Boolean);
   if (!words.length) return;
   if (!ly.line) {
@@ -905,6 +953,11 @@ function runSegmenter(v, now) {
     echo.live = echo.ring[echo.head].c;     // the CURRENT mask, zero added delay
     echo.fw = w; echo.fh = h;
     echo.frameBox = x2 >= 0 ? [x1, y1, x2 + 1, y2 + 1] : null;
+    if (x2 >= 0) {
+      let sx2 = 0, n = 0; const yy = Math.min(h - 1, y1 + 4);
+      for (let x = x1; x <= x2; x++) if ((px[yy * w + x] >>> 24) > 128) { sx2 += x; n++; }
+      echo.headPos = [n ? sx2 / n : (x1 + x2) / 2, y1];
+    }
     echo.convMs = performance.now() - tc;
   });
   echo.fps = echo.fps * 0.9 + (1000 / Math.max(1, now - echo.lastSegAt)) * 0.1;
@@ -954,6 +1007,11 @@ function gpuMask(m, now) {
       for (let i = 0, y = 0; y < 27; y++) for (let x = 0; x < 48; x++, i += 4) if (d[i + 3] > 128) {
         if (x < x1) x1 = x; if (x > x2) x2 = x; if (y < y1) y1 = y; if (y > y2) y2 = y; }
       echo.frameBox = x2 >= 0 ? [x1 * w / 48, y1 * h / 27, (x2 + 1) * w / 48, (y2 + 1) * h / 27] : null;
+      if (x2 >= 0) {     // head: mean x of the top two occupied rows
+        let sx2 = 0, n = 0;
+        for (let y = y1; y <= Math.min(26, y1 + 1); y++) for (let x = 0; x < 48; x++) if (d[(y * 48 + x) * 4 + 3] > 128) { sx2 += x; n++; }
+        echo.headPos = [(sx2 / n + 0.5) * w / 48, y1 * h / 27];
+      }
     }
     echo.gpu = true; return true;
   } catch (err) { console.warn("GPU mask path unavailable, using CPU buffers", err); echo.gpu = false; return false; }
@@ -999,6 +1057,7 @@ function updateLatHud(now) {
     `cam frame   ${f(lat.camIv)} ms  (${f(lat.camIv ? 1000 / lat.camIv : 0, 0)} fps)`,
     `seg runs/s  ${f(echo.fps, 0)}`,
     `draw frame  ${f(lat.drawIv)} ms`,
+    `neon draw   ${look.echo === "neon" ? f(echo.neonMs) + " ms" : "off"}`,
     `cam→draw    ~${f(lat.lagEma, 0)} ms (${lat.hasCap ? "captureTime" : "receiveTime"}; + display)`,
     `camera      ${st.width || "?"}x${st.height || "?"} @ ${st.frameRate ? Math.round(st.frameRate) : "?"}`,
   ].join("\n");
@@ -1079,7 +1138,7 @@ function drawGhosts(now, dt) {
   const md = modes.mode;       // projection: no light on the performer, so no echo/glow at all
   // 1) SAM snapshots: crisp silhouettes released into a slow rise-and-fade afterglow.
   perf.ghosts = perf.ghosts.filter(g => now - g.born < 9000);
-  for (const g of md === "off" ? perf.ghosts : []) {
+  for (const g of md === "off" && look.echo === "ghost" ? perf.ghosts : []) {
     const age = (now - g.born) / 1000, alpha = 0.38 * Math.min(1, age / 0.6) * Math.exp(-age / 2.6);
     if (alpha < 0.01) continue;
     const [fw, fh] = g.frame, [x1, y1, x2, y2] = g.bounds, { s, ox, oy } = frameRect(W, H, fw, fh);
@@ -1101,7 +1160,8 @@ function drawGhosts(now, dt) {
     tctx.globalCompositeOperation = "source-over";
     tctx.globalAlpha = 0.35; tctx.drawImage(echo.live, 0, 0); tctx.globalAlpha = 1;
 
-    const light = md === "composite" ? 0.5 : 1, showEcho = md === "off" || (md === "composite" && modes.trail);
+    const neonOn = look.echo === "neon" && (md !== "projection" || look.lightOn);
+    const light = md === "composite" ? 0.5 : 1, showEcho = !neonOn && look.echo === "ghost" && (md === "off" || (md === "composite" && modes.trail));
     ctx.shadowColor = rgb(cur.c[2], 0.8); ctx.shadowBlur = 30;
     ctx.globalAlpha = 0.42 * light;
     if (showEcho) ctx.drawImage(tinted(echo.trail, rgb(cur.c[1], 1)), ox, oy, dw, dh);
@@ -1114,7 +1174,9 @@ function drawGhosts(now, dt) {
         ox - (dw * (grow - 1)) / 2, oy - dh * (grow - 1), dw * grow, dh * grow);
     });
     ctx.shadowBlur = 26; ctx.globalAlpha = 0.4;
-    if (md === "off") ctx.drawImage(tinted(echo.live, rgb(cur.c[2], 1)), ox, oy, dw, dh);
+    if (md === "off" && look.echo === "ghost") ctx.drawImage(tinted(echo.live, rgb(cur.c[2], 1)), ox, oy, dw, dh);
+    ctx.shadowBlur = 0; ctx.globalAlpha = 1;
+    if (neonOn) drawNeon(ctx, now, dt, s, ox, oy);
 
     if (echo.frameBox) {     // performer box in screen space (un-mirrored) for lyric placement
       const [x1, y1, x2, y2] = echo.frameBox, sx = W / innerWidth;
@@ -1122,6 +1184,10 @@ function drawGhosts(now, dt) {
       if (perf.mirror) [a, b] = [W - b, W - a];
       echo.box = [a / sx, (oy + y1 * s) / sx, b / sx, (oy + y2 * s) / sx];
       echo.boxAt = now;
+      if (echo.headPos) {
+        let hx = ox + echo.headPos[0] * s; if (perf.mirror) hx = W - hx;
+        echo.headScr = [hx / sx, (oy + echo.headPos[1] * s) / sx]; echo.headAt = now;
+      }
     }
   }
   ctx.globalAlpha = 1; ctx.shadowBlur = 0;
@@ -1140,7 +1206,7 @@ function setMode(m) {
   modes.mode = m;
   $("#modeBtn").textContent = m === "off" ? "Mode" : MODE_NAMES[m]; $("#modeBtn").setAttribute("aria-pressed", m === "off" ? "false" : "true");
   $("#modePanel").classList.toggle("on", m !== "off");
-  document.querySelectorAll("#modePanel [data-for=projection]").forEach(el => el.style.display = m === "projection" ? "" : "none");
+  document.querySelectorAll("#more [data-for=projection]").forEach(el => el.style.display = m === "projection" ? "" : "none");
   if (m !== "projection" && cal.open) calOpen(false);
   if (m === "off") $("#comp").getContext("2d").clearRect(0, 0, $("#comp").width, $("#comp").height);
   if (m !== "off" && !perf.on) performOn();
@@ -1150,7 +1216,7 @@ function cycleMode() { setMode({ off: "composite", composite: "projection", proj
 const comp = { tmp: canvas2(2, 2), tmp2: canvas2(2, 2) };
 function drawComp(now) {
   const cv = $("#comp"), ctx = cv.getContext("2d"), W = cv.width, H = cv.height;
-  if (modes.mode === "off" || !perf.on || !echo.live || now - echo.lastSegAt > 1000) { if (comp.dirty) { ctx.clearRect(0, 0, W, H); comp.dirty = false; } return; }
+  if (modes.mode === "off" || (modes.mode === "projection" && look.lightOn) || !perf.on || !echo.live || now - echo.lastSegAt > 1000) { if (comp.dirty) { ctx.clearRect(0, 0, W, H); comp.dirty = false; } return; }
   const fw = echo.fw, fh = echo.fh, { s, ox, oy } = frameRect(W, H, fw, fh), dw = fw * s, dh = fh * s;
   for (const t of [comp.tmp, comp.tmp2]) if (t.width !== fw || t.height !== fh) { t.width = fw; t.height = fh; }
   const t = comp.tmp.getContext("2d");
@@ -1269,10 +1335,199 @@ function wireModes() {
   setMode("off");
 }
 
+// ---------------------------------------------------------------- Neon contour: outline + pose-history row
+// Outline = mask minus its 1 px erosion (8 offset draws with destination-in), at half resolution.
+// Every 130 ms the outline and the subject's box go into a preallocated ring; 6 copies are drawn in a
+// row beside the performer, each from k*130 ms ago, so the motion reads as a travelling pose history.
+const NEON_N = 6, NEON_STEP_MS = 130, NEON_SPACING = 0.2;
+const NEON_OFFS = [[1, 0], [-1, 0], [0, 1], [0, -1], [.7, .7], [-.7, .7], [.7, -.7], [-.7, -.7]];
+const neon = { w: 0, h: 0, ring: [], head: -1, lastCap: 0, rowX: null, dir: 1 };
+function neonEnsure(w, h) {
+  if (neon.w === w && neon.h === h) return;
+  Object.assign(neon, { w, h, m: canvas2(w, h), er: canvas2(w, h), out: canvas2(w, h), head: -1, rowX: null,
+    ring: Array.from({ length: NEON_N + 1 }, () => ({ c: canvas2(w, h), box: null, t: 0 })) });
+  const g = perf.scratch.getContext("2d").createLinearGradient(0, 0, 0, h);
+  g.addColorStop(0, "#ff8a3d"); g.addColorStop(1, "#ffd166"); neon.grad = g;
+}
+function neonOutline() {
+  const { w, h } = neon, m = neon.m.getContext("2d"), er = neon.er.getContext("2d"), out = neon.out.getContext("2d");
+  m.globalCompositeOperation = "copy"; m.drawImage(echo.live, 0, 0, w, h);
+  er.globalCompositeOperation = "copy"; er.drawImage(neon.m, 0, 0);
+  er.globalCompositeOperation = "destination-in";
+  for (const [dx, dy] of NEON_OFFS) er.drawImage(neon.m, dx, dy);
+  out.globalCompositeOperation = "copy"; out.drawImage(neon.m, 0, 0);
+  out.globalCompositeOperation = "destination-out"; out.drawImage(neon.er, 0, 0);
+}
+function neonPaint(ctx, src, sx, sy, sw, sh, dx, dy, dw, dh, alpha, glow) {
+  if (sw < 1 || sh < 1) return;
+  ctx.globalAlpha = alpha; ctx.shadowColor = "rgba(255,61,154,.95)"; ctx.shadowBlur = glow ? 12 : 0;
+  ctx.drawImage(tinted(src, "#ff3d9a"), sx, sy, sw, sh, dx, dy, dw, dh);          // hot pink outer
+  ctx.shadowBlur = 0; ctx.globalAlpha = alpha * 0.8;
+  ctx.drawImage(tinted(src, neon.grad), sx, sy, sw, sh, dx + dw * 0.004, dy + dh * 0.004, dw * 0.992, dh * 0.992);   // orange → yellow inner highlight
+}
+function drawNeon(ctx, now, dt, s, ox, oy) {
+  const t0 = performance.now();
+  neonEnsure(echo.fw >> 1, echo.fh >> 1);
+  neonOutline();
+  const fb = echo.frameBox;
+  if (fb && now - neon.lastCap >= NEON_STEP_MS) {
+    neon.lastCap = now - neon.lastCap < NEON_STEP_MS * 2 ? neon.lastCap + NEON_STEP_MS : now;
+    neon.head = (neon.head + 1) % neon.ring.length;
+    const r = neon.ring[neon.head], rc = r.c.getContext("2d");
+    rc.globalCompositeOperation = "copy"; rc.drawImage(neon.out, 0, 0); r.box = fb.slice(); r.t = now;
+  }
+  const sc = s * 2;
+  ctx.globalCompositeOperation = "lighter";
+  neonPaint(ctx, neon.out, 0, 0, neon.w, neon.h, ox, oy, neon.w * sc, neon.h * sc, 0.95, true);   // current outline, zero delay
+  if (fb) {
+    const [x1, , x2] = fb, bw = x2 - x1, fw = echo.fw;
+    if (look.side === "auto") {           // the freer side, with hysteresis so it doesn't flip-flop
+      const right = fw - x2, left = x1;
+      if (neon.dir > 0 && left > right * 1.4) neon.dir = -1; else if (neon.dir < 0 && right > left * 1.4) neon.dir = 1;
+    } else neon.dir = (look.side === "right") !== perf.mirror ? 1 : -1;   // explicit side is in screen terms
+    const target = neon.dir > 0 ? x1 + bw * 0.55 : x2 - bw * 0.55;
+    neon.rowX = neon.rowX === null ? target : neon.rowX + (target - neon.rowX) * (1 - Math.exp(-dt / 0.18));
+    const step = Math.max(10, bw * NEON_SPACING), R = neon.ring.length;
+    let floorY = 0, minX = Infinity, maxX = -Infinity;
+    for (let k = NEON_N; k >= 1; k--) {   // oldest first, newest (nearest the performer) on top
+      const r = neon.ring[(neon.head - (k - 1) + R * 2) % R];
+      if (!r.t || !r.box || now - r.t > NEON_STEP_MS * (NEON_N + 3)) continue;
+      const [bx1, by1, bx2, by2] = r.box, cw = bx2 - bx1, ch = by2 - by1;
+      const left = neon.dir > 0 ? neon.rowX + k * step : neon.rowX - k * step - cw;
+      neonPaint(ctx, r.c, bx1 / 2, by1 / 2, cw / 2, ch / 2, ox + left * s, oy + by1 * s, cw * s, ch * s, 0.9 * (1 - k / (NEON_N + 2)), k <= 2);
+      floorY = Math.max(floorY, by2); minX = Math.min(minX, left); maxX = Math.max(maxX, left + cw);
+    }
+    if (maxX > minX) {                    // thin floor baseline under the row
+      const y = oy + Math.min(floorY, echo.fh - 2) * s;
+      ctx.globalAlpha = 0.8; ctx.strokeStyle = "#ff3d9a"; ctx.lineWidth = 2; ctx.shadowColor = "rgba(255,61,154,.9)"; ctx.shadowBlur = 8;
+      ctx.beginPath(); ctx.moveTo(ox + minX * s, y); ctx.lineTo(ox + maxX * s, y); ctx.stroke();
+    }
+  }
+  ctx.globalCompositeOperation = "source-over"; ctx.globalAlpha = 1; ctx.shadowBlur = 0;
+  echo.neonMs = echo.neonMs ? echo.neonMs * 0.9 + (performance.now() - t0) * 0.1 : performance.now() - t0;
+}
+
+// ---------------------------------------------------------------- Handwritten lyrics (Reel look)
+// Two lines max, revealed letter by letter, anchored one line above the performer's head with a
+// critically damped spring. Each phrase gets the next hand font in a fixed order (deterministic).
+const HAND_FONTS = 5, HAND_CPS = 45;
+const hand = { ph: null, idx: 0, font: 0, target: "", offset: 0, rendered: "", budget: 0, ended: false, lastAt: 0,
+  x: null, y: null, vx: 0, vy: 0, tx: null, ty: null, lh: 50 };
+function handNewPhrase() {
+  const box = $("#hand");
+  for (const old of box.querySelectorAll(".ph:not(.out)")) { old.classList.add("out"); setTimeout(() => old.remove(), 350); }
+  hand.font = hand.idx % HAND_FONTS; hand.idx++;
+  hand.ph = document.createElement("div"); hand.ph.className = `ph f${hand.font}`;
+  box.insertBefore(hand.ph, $("#hcur")); hand.rendered = ""; hand.budget = 0;
+  hand.lh = parseFloat(getComputedStyle(hand.ph).lineHeight) || 50;
+}
+function handLyric(text, done) {
+  if (hand.ended || !hand.ph) { hand.offset = 0; hand.ended = false; handNewPhrase(); }
+  hand.target = text; hand.lastAt = performance.now();
+  if (done) hand.ended = true;
+}
+function handAppend(ch, i) {
+  if (ch === " ") { hand.ph.append(" "); return; }
+  const sp = document.createElement("span"); sp.textContent = ch;
+  if ((hand.idx * 31 + i * 17) % 11 === 0) sp.className = `f${(hand.font + 2) % HAND_FONTS}`;   // a few letters in another hand
+  hand.ph.append(sp);
+}
+function handTick(now, dt) {
+  const el = $("#hand");
+  if (hand.ph) {
+    const vis = hand.target.slice(hand.offset);
+    let common = 0; while (common < hand.rendered.length && hand.rendered[common] === vis[common]) common++;
+    if (common < hand.rendered.length) {       // ASR revised earlier words: rebuild from the common prefix
+      hand.ph.textContent = ""; const keep = vis.slice(0, common); hand.rendered = "";
+      for (let i = 0; i < keep.length; i++) { handAppend(keep[i], i); hand.rendered += keep[i]; }
+    }
+    hand.budget = Math.min(hand.budget + dt * HAND_CPS, 4);
+    while (hand.budget >= 1 && hand.rendered.length < vis.length) {
+      const i = hand.rendered.length, ch = vis[i];
+      handAppend(ch, i); hand.rendered += ch; hand.budget -= 1;
+      if (ch !== " " && hand.ph.offsetHeight > hand.lh * 2.4) {   // a third line: move this word into a fresh phrase
+        const ws = hand.rendered.lastIndexOf(" ") + 1;
+        hand.offset += ws; handNewPhrase(); break;
+      }
+    }
+    if (hand.ended && now - hand.lastAt > 5000 && !hand.ph.classList.contains("out")) { hand.ph.classList.add("out"); }
+  }
+  // position: one line above the head, eased by a critically damped spring (~0.25 s lag)
+  const W = innerWidth, H = innerHeight, bw = el.offsetWidth || 300, bh = el.offsetHeight || hand.lh;
+  if (look.follow && echo.headScr && now - echo.headAt < 600) {
+    hand.tx = echo.headScr[0] - Math.min(bw, 320) * 0.1; hand.ty = echo.headScr[1] - hand.lh * 0.85 - bh;
+  } else if (!look.follow || hand.tx === null) { hand.tx = W * 0.3; hand.ty = H * 0.24 - bh; }   // else: hold the last position
+  const tx = Math.min(Math.max(hand.tx, 16), Math.max(16, W - bw - 16)), ty = Math.min(Math.max(hand.ty, 64), Math.max(64, H - bh - 230));
+  if (hand.x === null) { hand.x = tx; hand.y = ty; }
+  const w0 = 5, h = Math.min(dt, 0.05);
+  hand.vx += (w0 * w0 * (tx - hand.x) - 2 * w0 * hand.vx) * h; hand.x += hand.vx * h;
+  hand.vy += (w0 * w0 * (ty - hand.y) - 2 * w0 * hand.vy) * h; hand.y += hand.vy * h;
+  el.style.transform = `translate(${hand.x.toFixed(1)}px, ${hand.y.toFixed(1)}px)`;
+  // HUD details: cursor box on the newest letter, x/y readout, two drifting hairline leaders
+  const last = hand.ph && !hand.ph.classList.contains("out") ? hand.ph.querySelector("span:last-of-type") : null;
+  const live = !!last && look.hud;
+  el.classList.toggle("live", live); $("#leaders").classList.toggle("live", live);
+  if (!live) return;
+  const cur = $("#hcur"), cw = Math.max(last.offsetWidth + 6, 14), chh = last.offsetHeight * 0.92;
+  const cx = last.offsetLeft - 3, cy = last.offsetTop + last.offsetHeight * 0.06;
+  Object.assign(cur.style, { left: cx + "px", top: cy + "px", width: cw + "px", height: chh + "px" });
+  const sxp = hand.x + cx + cw / 2, syp = hand.y + cy + chh / 2;
+  Object.assign($("#hxy").style, { left: cx + cw + 3 + "px", top: cy - 4 + "px" });
+  $("#hxy").textContent = `x: ${Math.round(sxp * devicePixelRatio)} y: ${Math.round(syp * devicePixelRatio)}`;
+  const t = now / 1000, lines = $("#leaders").children;
+  const ends = [[-0.75 + 0.3 * Math.sin(t * 0.21), 300 + 90 * Math.sin(t * 0.17)], [2.25 + 0.35 * Math.sin(t * 0.13 + 1), 380 + 120 * Math.sin(t * 0.11 + 2)]];
+  ends.forEach(([a, L], i) => { const l = lines[i]; l.setAttribute("x1", sxp); l.setAttribute("y1", syp);
+    l.setAttribute("x2", sxp + Math.cos(a) * L); l.setAttribute("y2", syp + Math.sin(a) * L); });
+}
+
+// ---------------------------------------------------------------- Looks / presets
+// "reel" = Violet room + Neon contour + Handwritten + HUD details. Deterministic: fixed font order,
+// no randomness. Ordinary visitors get the Reel visuals without camera/mic; the camera and lyrics
+// start only for ?preset=reel or an explicit click on the Reel chip / preset.
+const ROOM_STYLE = 6;
+const LOOKS = { reel: { echo: "neon", lyrics: "hand", hud: true, room: true }, classic: { echo: "ghost", lyrics: "kinetic", hud: false, room: false } };
+const look = { preset: "reel", echo: "neon", lyrics: "hand", hud: true, room: true, follow: true, side: "auto", lightOn: false };
+try { const sv = JSON.parse(localStorage.getItem("afterglow.look") || "null"); if (sv && LOOKS[sv.preset]) Object.assign(look, sv); } catch {}
+function saveLook() { try { localStorage.setItem("afterglow.look", JSON.stringify(look)); } catch {} }
+function lookChanged() {
+  $("#ghost").classList.toggle("neon", look.echo === "neon");
+  $("#stage").classList.toggle("room", look.room); $("#stage").classList.toggle("hud-on", look.hud);
+  $("#lyrics").style.display = look.lyrics === "hand" ? "none" : ""; $("#hand").style.display = look.lyrics === "hand" ? "" : "none";
+  const want = look.room ? ROOM_STYLE : Math.max(0, STYLES.indexOf(ly.sceneStyle));
+  if (!lookChanged.done) { style.a = style.b = want; style.mix = 0; lookChanged.done = true; }
+  else if (style.mix > 0) style.queued = want; else if (want !== style.a) { style.b = want; style.mix = 0.0001; }
+  const reel = look.preset === "reel";
+  $("#lookBtn").textContent = reel ? "Reel" : "Classic";
+  $("#lookBtn").setAttribute("aria-label", reel ? "Look: Reel. Switch to Classic" : "Look: Classic. Switch to Reel");
+  $("#roomSel").value = look.room ? "1" : "0"; $("#echoSel").value = look.echo; $("#sideSel").value = look.side;
+  $("#lyricSel").value = look.lyrics; $("#optFollow").checked = look.follow; $("#optHud").checked = look.hud; $("#optLight").checked = look.lightOn;
+  saveLook();
+}
+function applyLook(name, start) {
+  Object.assign(look, LOOKS[name], { preset: name }); lookChanged();
+  setStatus("ready", name === "reel" ? "Reel look" : "Classic look");
+  if (start && name === "reel") { if (!perf.on) performOn(); if (!ly.on && !ly.pending) lyricsOn(); }
+}
+function wireLook() {
+  $("#lookBtn").addEventListener("click", () => applyLook(look.preset === "reel" ? "classic" : "reel", true));
+  $("#reelChip").addEventListener("click", () => applyLook("reel", true));
+  $("#presetReel").addEventListener("click", () => applyLook("reel", true));
+  $("#presetClassic").addEventListener("click", () => applyLook("classic"));
+  const set = (k, v) => { look[k] = v; lookChanged(); };
+  $("#roomSel").addEventListener("change", e => set("room", e.target.value === "1"));
+  $("#echoSel").addEventListener("change", e => set("echo", e.target.value));
+  $("#sideSel").addEventListener("change", e => set("side", e.target.value));
+  $("#lyricSel").addEventListener("change", e => { set("lyrics", e.target.value); if (ly.line) endLine(); });
+  $("#optFollow").addEventListener("change", e => set("follow", e.target.checked));
+  $("#optHud").addEventListener("change", e => set("hud", e.target.checked));
+  $("#optLight").addEventListener("change", e => set("lightOn", e.target.checked));
+  lookChanged();
+}
+
 // ---------------------------------------------------------------- first run: cues, chips, demo, help, More
 function sendCue(text, fromDemo) {
   if (!fromDemo) demoStop();
-  wsSend(JSON.stringify({ type: "text_cue", text }));
+  wsSend(JSON.stringify({ type: "text_cue", text, no_backdrop: look.room }));
   setCaption(text, false); timing.release = performance.now(); timing.final = 0;
   hideHint();
 }
@@ -1363,11 +1618,12 @@ function wireInput() {
 try { initGL(); } catch (err) { console.warn("WebGL unavailable; backdrop-only mode", err); fx.gl = null; }
 resize(); addEventListener("resize", resize);
 requestAnimationFrame(frame);
-wireInput(); wireModes(); wireFirstRun();
+wireInput(); wireModes(); wireFirstRun(); wireLook();
 connect();
 $("#go").addEventListener("click", async () => {
   $("#start").remove();
   showHint();        // the mic is requested on first use (mic button / Lyrics), not here: chips work without it
+  if (new URLSearchParams(location.search).get("preset") === "reel") applyLook("reel", true);
   // Warm the on-device segmenter (~15 MB, cached afterwards) so Perform starts instantly.
   // Skipped on small screens and data-saver connections; there it loads on first Perform.
   const saveData = navigator.connection && navigator.connection.saveData;
