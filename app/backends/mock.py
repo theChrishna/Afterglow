@@ -126,16 +126,24 @@ class MockLyricsSession:
 
     async def _run(self) -> None:
         turn = 0
+        src = self.source
         while True:
-            src = self.source
+            if self.source is not src:           # switched to the song: drop any half-sung canned line
+                src, turn = self.source, 0
             line = src[turn % len(src)]
             words = line.split()
             await self.on_event({"type": "speechStart", "turnId": turn})
+            switched = False
             for n in range(1, len(words) + 1):
                 while time.monotonic() - self._last_audio > 0.5:  # paused: no mic audio
                     await asyncio.sleep(0.1)
                 await asyncio.sleep(MOCK_WORD_S)
+                if self.source is not src:
+                    switched = True
+                    break
                 await self.on_event({"type": "transcript", "final": False, "transcript": " ".join(words[:n])})
+            if switched:
+                continue
             await self.on_event({"type": "speechComplete", "turnId": turn, "transcript": line})
             turn += 1
             await asyncio.sleep(MOCK_GAP_S)

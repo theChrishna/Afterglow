@@ -18,6 +18,7 @@ from .limits import limits
 from .sam_mask import jpeg_size
 from .backends.mock import RELATIVE_WORDS
 from .scene import DEFAULT_SCENE, Scene, bank_scene, match_bank
+from .song_controller import SongController
 from .telemetry import log_event, log_stage, summary
 
 app = FastAPI(title="Afterglow", docs_url=None, redoc_url=None)
@@ -88,6 +89,7 @@ class Stage:
         self.asr = None
         self.asr_bytes = 0
         self.lyrics = None
+        self.song: SongController | None = None   # Song mode (experimental, SONG_MODE=1)
         self.cue_seq = 0
         self.ptt_backdrop = True   # False while the page's backdrops are hidden (Reel look): saves image credits
         self._send_lock = asyncio.Lock()
@@ -110,7 +112,8 @@ class Stage:
 
     async def run(self) -> None:
         await self.send(type="hello", mode="mock" if config.MOCK else "live",
-                        scene=self.scene.model_dump(), backdrop=bank_url(self.scene))
+                        scene=self.scene.model_dump(), backdrop=bank_url(self.scene),
+                        song_mode=config.SONG_MODE)
         try:
             while True:
                 msg = await self.ws.receive()
@@ -127,6 +130,7 @@ class Stage:
                 await self.asr.close()
             if self.lyrics:
                 await self.lyrics.close()
+            await self.song_stop()
             for t in list(self._tasks):
                 t.cancel()
 
@@ -161,6 +165,10 @@ class Stage:
             await self.start_lyrics()
         elif kind == "lyrics_stop":
             await self.stop_lyrics("stopped")
+        elif kind == "song_start":
+            await self.song_start()
+        elif kind == "song_stop":
+            await self.song_stop()
         elif kind == "text_cue":
             text = str(m.get("text", "")).strip()[:300]
             if text:
@@ -185,6 +193,8 @@ class Stage:
 
         async def on_event(ev: dict) -> None:
             t = ev.get("type")
+            if self.song:
+                self.song.feed(ev)
             if t == "transcript" and not ev.get("final"):
                 await self.send(type="lyric", text=ev.get("transcript", ""), done=False)
             elif t == "speechComplete":
@@ -204,6 +214,28 @@ class Stage:
         await self.send(type="lyrics_state", on=True,
                         left_s=round(limits.seconds_left(self.ip, "lyrics", config.LYRICS_SECONDS_PER_IP)))
 
+    # ---------------------------------------------------------------- Song mode (experimental)
+
+    async def song_start(self) -> None:
+        if not config.SONG_MODE:
+            await self.send(type="song", state="off", detail="Song mode is off on this server.")
+            return
+        if not self.lyrics:
+            await self.send(type="song", state="off", detail="Turn Lyrics on first.")
+            return
+        if self.song:
+            return
+        live = not config.MOCK
+        self.song = SongController(self.send, self.ip, live)
+        if hasattr(self.lyrics, "sing_song"):
+            self.lyrics.sing_song()                 # mock only: the offline singer performs the invented song
+        await self.song.start()
+
+    async def song_stop(self) -> None:
+        song, self.song = self.song, None
+        if song:
+            await song.stop()
+
     def on_lyrics_audio(self, frame: bytes) -> None:
         if not self.lyrics:
             return
@@ -217,6 +249,7 @@ class Stage:
         session, self.lyrics = self.lyrics, None
         if session is None:
             return
+        await self.song_stop()
         session.stop()  # server flushes and closes; the session task charges the audio
         self.spawn(_close_later(session))
         detail = {"used": f"Lyrics time used up ({config.LYRICS_SECONDS_PER_IP // 60} min per visitor per day).",
