@@ -9,7 +9,8 @@
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Playfair+Display:ital,wght@1,600&family=Space+Grotesk:wght@500;700&family=Space+Mono:wght@700&display=swap" rel="stylesheet">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='12' fill='%236a2cff'/%3E%3Ccircle cx='16' cy='16' r='6' fill='%2333d1ff'/%3E%3C/svg%3E">
 <style>
-  :root { --c0: #05010f; --c1: #6a2cff; --c2: #33d1ff; --ui: rgba(255,255,255,.88); --ui-dim: rgba(255,255,255,.55); }
+  :root { --c0: #05010f; --c1: #6a2cff; --c2: #33d1ff; --ui: rgba(255,255,255,.9); --ui-dim: rgba(255,255,255,.62);
+    --accent: #e74d9e; --glass: rgba(12,6,16,.52); --hair: rgba(255,255,255,.14); }
   * { box-sizing: border-box; }
   html, body { margin: 0; height: 100%; background: #000; color: var(--ui); overflow: hidden;
     font: 15px/1.4 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; }
@@ -22,7 +23,7 @@
   .bd.on { opacity: 1; }
   #fx { position: absolute; inset: 0; width: 100%; height: 100%; mix-blend-mode: screen; }
   #comp { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
-  #modePanel { display: none; position: absolute; left: 12px; top: 60px; z-index: 8; padding: 8px 10px; border-radius: 8px; background: rgba(0,0,0,.6); color: #eee; font: 12px/1.6 system-ui, sans-serif; }
+  #modePanel { display: none; }
   #calib { display: none; position: absolute; inset: 0; z-index: 10; }
   #calib.on { display: block; }
   #calPat { position: absolute; left: 0; top: 0; transform-origin: 0 0; pointer-events: none; }
@@ -30,7 +31,7 @@
   #calib .h { position: absolute; width: 28px; height: 28px; margin: -14px 0 0 -14px; border: 2px solid #ff0; border-radius: 50%; background: rgba(255,255,0,.25); cursor: grab; touch-action: none; }
   #calCtl { position: absolute; left: 50%; top: 50%; translate: -50% -50%; padding: 12px 14px; border-radius: 10px; background: rgba(0,0,0,.75); color: #eee; font: 12px/1.7 system-ui, sans-serif; max-width: min(340px, calc(100vw - 32px)); }
   #calCtl label { display: block; } #calCtl input[type=range] { width: 140px; vertical-align: middle; }
-  #modePanel.on { display: block; } #modePanel label { display: block; } #modePanel input[type=range] { width: 110px; vertical-align: middle; }
+  #modePanel.on { display: block; }
   #ghost { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
   #tint { position: absolute; inset: 0; mix-blend-mode: soft-light; opacity: 0; transition: opacity 1.6s ease, background-color 1.6s ease; }
 
@@ -40,8 +41,10 @@
   .brand { position: absolute; top: max(14px, env(safe-area-inset-top)); left: 16px; letter-spacing: .32em;
     font-size: 12px; font-weight: 600; color: var(--ui-dim); }
   #status { position: absolute; top: max(10px, env(safe-area-inset-top)); right: 16px; display: flex; align-items: center; gap: 8px;
-    padding: 6px 12px; border-radius: 999px; background: rgba(0,0,0,.45); backdrop-filter: blur(8px); font-size: 13px; }
-  #status .dot { width: 9px; height: 9px; border-radius: 50%; background: #3ddc84; }
+    padding: 6px 12px; border: 1px solid var(--hair); border-radius: 999px; background: var(--glass); backdrop-filter: blur(10px); font-size: 13px;
+    max-width: calc(100% - 140px); }
+  #status .text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #status .dot { width: 8px; height: 8px; flex: none; border-radius: 50%; background: #3ddc84; }
   #status[data-state="listening"] .dot { background: #ff3b5c; animation: pulse 1s infinite; }
   #status[data-state="transcribing"] .dot, #status[data-state="thinking"] .dot { background: #ffb020; animation: pulse .7s infinite; }
   #status[data-state="error"] .dot { background: #ff6b3d; }
@@ -49,42 +52,73 @@
   #status .mode { font-size: 11px; letter-spacing: .12em; color: var(--ui-dim); text-transform: uppercase; }
   @keyframes pulse { 50% { opacity: .35; } }
 
-  #caption { position: absolute; left: 50%; bottom: calc(120px + env(safe-area-inset-bottom)); transform: translateX(-50%);
+  #caption { position: absolute; left: 50%; bottom: calc(170px + env(safe-area-inset-bottom)); transform: translateX(-50%);
     width: min(860px, calc(100% - 32px)); text-align: center; font-size: clamp(18px, 3vw, 28px); font-weight: 500;
     text-shadow: 0 2px 18px rgba(0,0,0,.8); opacity: 0; transition: opacity .5s; }
   #caption.show { opacity: 1; }
   #caption.partial { color: var(--ui-dim); font-style: italic; }
 
-  #mood { position: absolute; left: 16px; bottom: calc(18px + env(safe-area-inset-bottom)); font-size: 13px; color: var(--ui-dim); max-width: 45%;
+  #mood { position: absolute; left: 16px; top: calc(36px + env(safe-area-inset-top)); font-size: 12px; color: var(--ui-dim); max-width: 45%;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   #mood b { color: var(--ui); font-weight: 600; }
-  #prov { position: absolute; left: 16px; top: calc(40px + env(safe-area-inset-top)); font-size: 11px; flex-wrap: wrap; max-width: calc(100% - 32px);
+  #prov { position: absolute; left: 16px; top: calc(60px + env(safe-area-inset-top)); font-size: 11px; flex-wrap: wrap; max-width: calc(100% - 32px);
     letter-spacing: .06em; color: var(--ui-dim); text-transform: uppercase; display: flex; gap: 6px; align-items: center; }
   #prov .chip { padding: 2px 7px; border-radius: 999px; background: rgba(255,255,255,.1); color: var(--ui); text-transform: none; letter-spacing: 0; }
   #prov .chip.made { background: rgba(255,255,255,.88); color: #000; }
   #prov.flash .chip { animation: chipin .6s ease; }
   @keyframes chipin { from { opacity: .2; transform: translateY(3px); } }
-  #timing { position: absolute; right: 16px; bottom: calc(18px + env(safe-area-inset-bottom)); font-size: 12px;
+  #timing { position: absolute; right: 16px; top: calc(52px + env(safe-area-inset-top)); font-size: 12px;
     color: var(--ui-dim); font-variant-numeric: tabular-nums; text-align: right; }
 
-  #controls { position: absolute; left: 50%; bottom: calc(44px + env(safe-area-inset-bottom)); transform: translateX(-50%);
-    display: flex; gap: 10px; align-items: center; width: min(560px, calc(100% - 32px)); }
-  #ptt { flex: 0 0 auto; border: 0; border-radius: 999px; padding: 14px 20px; font: inherit; font-weight: 600;
-    color: #fff; background: rgba(255,255,255,.14); backdrop-filter: blur(10px); cursor: pointer; touch-action: none;
-    user-select: none; -webkit-user-select: none; transition: background .15s, transform .15s; }
-  #ptt.active { background: #ff3b5c; transform: scale(1.04); }
-  #perform { flex: 0 0 auto; border: 1px solid rgba(255,255,255,.22); border-radius: 999px; padding: 13px 16px; font: inherit;
-    font-size: 14px; color: #fff; background: rgba(0,0,0,.4); backdrop-filter: blur(10px); cursor: pointer;
-    font-variant-numeric: tabular-nums; white-space: nowrap; }
-  #perform[aria-pressed="true"] { background: rgba(255,255,255,.9); color: #000; border-color: transparent; }
+  #controls { position: absolute; left: 50%; bottom: calc(18px + env(safe-area-inset-bottom)); transform: translateX(-50%);
+    display: flex; gap: 8px; align-items: center; justify-content: center; flex-wrap: wrap; width: min(720px, calc(100% - 32px)); }
+  .btn { flex: 0 0 auto; min-height: 44px; min-width: 44px; display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+    border: 1px solid var(--hair); border-radius: 999px; padding: 0 16px; font-weight: 600; font-size: 12px; line-height: 1; font-family: inherit; letter-spacing: .12em; text-transform: uppercase;
+    color: var(--ui); background: var(--glass); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); cursor: pointer; white-space: nowrap; }
+  .btn:hover { border-color: rgba(255,255,255,.3); }
+  .btn[aria-pressed="true"], .btn[aria-expanded="true"] { border-color: var(--accent); color: #fff; box-shadow: inset 0 0 0 1px var(--accent); }
+  .btn svg { width: 18px; height: 18px; flex: none; }
+  .btn.icon { padding: 0; width: 44px; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  #ptt { min-height: 52px; padding: 0 22px; font-size: 13px; background: rgba(231,77,158,.22); border-color: rgba(231,77,158,.55);
+    touch-action: none; user-select: none; -webkit-user-select: none; transition: background .15s, transform .15s; }
+  #ptt.active { background: var(--accent); color: #fff; transform: scale(1.04); }
+  #chips { position: absolute; left: 50%; bottom: calc(80px + env(safe-area-inset-bottom)); transform: translateX(-50%);
+    display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; width: min(720px, calc(100% - 32px)); }
+  .chipbtn { min-height: 40px; padding: 0 14px; border: 1px solid var(--hair); border-radius: 999px; background: rgba(12,6,16,.38);
+    backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); color: var(--ui); font-weight: 500; font-size: 13px; line-height: 1; font-family: inherit; cursor: pointer; }
+  .chipbtn:hover { border-color: var(--accent); }
+  .chipbtn.alt { color: #fff; border-color: rgba(231,77,158,.6); }
+  #hint { position: absolute; left: 50%; bottom: calc(142px + env(safe-area-inset-bottom)); transform: translateX(-50%); padding: 6px 14px;
+    border: 1px solid var(--hair); border-radius: 999px; background: var(--glass); backdrop-filter: blur(10px); font-size: 13px; color: var(--ui);
+    white-space: nowrap; transition: opacity .6s; }
+  #hint.gone { opacity: 0; pointer-events: none; }
+  #demoBar { position: absolute; left: 50%; top: calc(54px + env(safe-area-inset-top)); transform: translateX(-50%); display: none; align-items: center; gap: 10px;
+    padding: 4px 4px 4px 14px; border: 1px solid rgba(231,77,158,.6); border-radius: 999px; background: var(--glass); backdrop-filter: blur(10px);
+    font-size: 13px; max-width: calc(100% - 32px); }
+  #demoBar.on { display: flex; } #demoBar span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #demoBar .btn { min-height: 32px; padding: 0 12px; }
+  #more { position: absolute; right: 16px; bottom: calc(126px + env(safe-area-inset-bottom)); z-index: 6; width: min(320px, calc(100% - 32px));
+    max-height: calc(100% - 190px); overflow-y: auto; display: none; padding: 12px 14px; border: 1px solid var(--hair); border-radius: 14px;
+    background: rgba(12,6,16,.78); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); font-size: 13px; }
+  #more.on { display: block; }
+  #more h3 { margin: 12px 0 6px; font-weight: 600; font-size: 10px; line-height: 1; font-family: inherit; letter-spacing: .18em; text-transform: uppercase; color: var(--accent); }
+  #more h3:first-child { margin-top: 0; }
+  #more label { display: flex; align-items: center; gap: 8px; min-height: 32px; }
+  #more input[type=range] { flex: 1; accent-color: var(--accent); } #more input[type=checkbox] { accent-color: var(--accent); width: 18px; height: 18px; }
+  #more select { flex: 1; min-height: 32px; background: rgba(0,0,0,.4); color: var(--ui); border: 1px solid var(--hair); border-radius: 8px; font: inherit; }
+  #more .row { display: flex; gap: 6px; flex-wrap: wrap; } #more .row .btn { min-height: 36px; font-size: 11px; }
+  #help { position: absolute; left: 50%; top: 50%; translate: -50% -50%; z-index: 11; display: none; width: min(400px, calc(100% - 32px));
+    padding: 18px 20px; border: 1px solid var(--hair); border-radius: 14px; background: rgba(12,6,16,.9); backdrop-filter: blur(16px); }
+  #help.on { display: block; } #help h2 { margin: 0 0 8px; font-size: 16px; } #help p { margin: 0 0 14px; color: var(--ui-dim); }
+  .stageinfo #prov, .stageinfo #timing { display: flex; }
+  #prov, #timing { display: none; }
   #perform:disabled { opacity: .45; cursor: default; }
   /* Difference keeps the echo visible on dark and bright scenes alike (an inverted, glowing ghost). */
   #ghost { mix-blend-mode: difference; }
   #lat { position: absolute; right: 12px; top: 12px; z-index: 9; display: none; padding: 8px 10px; border-radius: 8px; background: rgba(0,0,0,.6); color: #9f9; font: 11px/1.45 ui-monospace, Menlo, monospace; white-space: pre; pointer-events: none; }
   #lat.on { display: block; }
-  #lyricsBtn, #modeBtn { flex: 0 0 auto; border: 1px solid rgba(255,255,255,.22); border-radius: 999px; padding: 13px 16px; font: inherit;
-    font-size: 14px; color: #fff; background: rgba(0,0,0,.4); backdrop-filter: blur(10px); cursor: pointer; white-space: nowrap; }
-  #lyricsBtn[aria-pressed="true"], #modeBtn[aria-pressed="true"] { background: rgba(255,255,255,.9); color: #000; border-color: transparent; }
+
 
   /* Lyrics: kinetic type, positioned by JS (follows the performer or wherever it was dragged). */
   #lyrics { position: absolute; left: 0; top: 0; z-index: 3; width: max-content; max-width: min(72vw, 940px);
@@ -116,22 +150,23 @@
   @keyframes ly-type { from { clip-path: inset(0 100% 0 0); } to { clip-path: inset(0 0 0 0); } }
   @media (prefers-reduced-motion: reduce) { .ly-line .w { animation: none !important; } }
   #cam { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
-  #cue { flex: 1 1 auto; min-width: 0; border: 1px solid rgba(255,255,255,.18); border-radius: 999px; padding: 13px 16px;
-    font: inherit; color: #fff; background: rgba(0,0,0,.4); backdrop-filter: blur(10px); outline: none; }
-  #cue:focus { border-color: rgba(255,255,255,.5); }
+  #cue { width: 100%; min-height: 40px; border: 1px solid var(--hair); border-radius: 10px; padding: 0 12px;
+    font: inherit; color: #fff; background: rgba(0,0,0,.4); outline: none; }
+  #cue:focus { border-color: var(--accent); }
   #cue::placeholder { color: rgba(255,255,255,.45); }
 
   #start { position: absolute; inset: 0; display: grid; place-items: center; background: rgba(0,0,0,.55);
     backdrop-filter: blur(6px); z-index: 10; text-align: center; padding: 16px; }
-  #start h1 { margin: 0 0 6px; font-size: clamp(34px, 7vw, 64px); letter-spacing: .18em; font-weight: 300; }
-  #start p { margin: 0 auto 22px; color: var(--ui-dim); max-width: 460px; }
-  #start button { border: 0; border-radius: 999px; padding: 14px 28px; font: inherit; font-weight: 600; cursor: pointer;
-    background: #fff; color: #000; }
+  #start h1 { margin: 0 0 10px; font-size: 12px; letter-spacing: .42em; font-weight: 600; color: var(--accent); }
+  #start p { margin: 0 auto 26px; font-size: clamp(26px, 5vw, 44px); line-height: 1.15; font-weight: 300; max-width: 640px; color: #fff; }
+  #start button { min-height: 48px; border: 1px solid var(--accent); border-radius: 999px; padding: 0 30px; font-weight: 600; font-size: 13px; line-height: 1; font-family: inherit; letter-spacing: .16em;
+    text-transform: uppercase; cursor: pointer; background: rgba(231,77,158,.25); color: #fff; }
+  #start button:hover { background: var(--accent); }
   #start small { display: block; margin-top: 14px; color: var(--ui-dim); }
   .kbd { display: inline-block; padding: 0 6px; border: 1px solid rgba(255,255,255,.35); border-radius: 4px; font-size: 12px; }
-  @media (max-width: 560px) { #mood { max-width: 55%; } #timing { display: none; }
-    #perform, #lyricsBtn, #modeBtn { padding: 13px 12px; }
-    #controls { flex-wrap: wrap; } #cue { flex-basis: 100%; } #caption { bottom: calc(110px + env(safe-area-inset-bottom)); } }
+  @media (max-width: 560px) { #mood { display: none; } .btn { padding: 0 12px; } #ptt { flex: 1 1 100%; }
+    #chips { bottom: calc(132px + env(safe-area-inset-bottom)); } #hint { bottom: calc(222px + env(safe-area-inset-bottom)); white-space: normal; text-align: center; width: calc(100% - 32px); }
+    #caption { bottom: calc(260px + env(safe-area-inset-bottom)); } #more { bottom: calc(176px + env(safe-area-inset-bottom)); max-height: calc(100% - 240px); } }
 </style>
 </head>
 <body>
@@ -142,13 +177,6 @@
   <canvas id="ghost"></canvas>
   <video id="cam" playsinline muted></video>
   <div id="lat"></div>
-  <div id="modePanel">
-    <label><input type="checkbox" id="mMirror" checked> mirror (F)</label>
-    <label><input type="checkbox" id="mTrail"> echo trail</label>
-    <label data-for="projection">grow <input type="range" id="mGrow" min="0" max="30" value="8"> <span id="vGrow"></span></label>
-    <label>feather <input type="range" id="mFeather" min="0" max="12" value="3"> <span id="vFeather"></span></label>
-    <label data-for="projection"><button id="calBtn" type="button">Calibrate (C)</button></label>
-  </div>
   <div id="calib" aria-label="Projection calibration">
     <canvas id="calPat"></canvas>
     <div class="h" data-i="0"></div><div class="h" data-i="1"></div><div class="h" data-i="2"></div><div class="h" data-i="3"></div>
@@ -169,13 +197,43 @@
     <div class="brand">AFTERGLOW</div>
     <div id="status" data-state="offline"><span class="dot"></span><span class="text">connecting…</span><span class="mode"></span></div>
     <div id="caption"></div>
-    <div id="controls">
-      <button id="ptt" aria-label="Hold to speak a command">Hold for command</button>
-      <button id="lyricsBtn" class="toggle" aria-pressed="false" title="Show everything you say or sing as lyrics (L)">Lyrics</button>
-      <button id="modeBtn" class="toggle" title="Performance mode: Off / Composite / Projection (M)">Mode</button>
-      <button id="perform" class="pill" aria-pressed="false" title="Ghost echo of your silhouette (camera, 3 min per visitor)">Perform</button>
-      <input id="cue" type="text" maxlength="300" placeholder="…or type a cue and press Enter" autocomplete="off">
+    <div id="demoBar" role="status"><span id="demoText"></span><button class="btn" id="demoStop" type="button">Stop</button></div>
+    <div id="hint" class="gone"></div>
+    <div id="chips" role="group" aria-label="Moods">
+      <button class="chipbtn" data-cue="Make it feel like a rainy city at 3am">Rain</button>
+      <button class="chipbtn" data-cue="Switch background mood to warm retro synth neon">Neon</button>
+      <button class="chipbtn" data-cue="Misty forest at dawn, very calm">Forest</button>
+      <button class="chipbtn" data-cue="Take us into deep space, slow and floating">Space</button>
+      <button class="chipbtn" data-cue="Now set everything on fire, fast and loud">Fire</button>
+      <button class="chipbtn" data-cue="Drop us underwater, calm and blue">Ocean</button>
+      <button class="chipbtn alt" id="demoBtn" type="button">&#9654; Watch the demo</button>
     </div>
+    <div id="controls">
+      <button id="ptt" class="btn" aria-label="Hold to speak a command"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg><span>Hold to speak</span></button>
+      <button id="lyricsBtn" class="btn" aria-pressed="false" title="Show everything you say or sing as lyrics (L)">Lyrics</button>
+      <button id="modeBtn" class="btn" aria-pressed="false" title="Performance mode: Off / Composite / Projection (M)">Mode</button>
+      <button id="perform" class="btn icon" aria-pressed="false" aria-label="Camera off. Turn on the camera (3 min per visitor)" title="Camera (P)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7h3l2-3h8l2 3h3v13H3z"/><circle cx="12" cy="13" r="4"/></svg></button>
+      <button id="moreBtn" class="btn" aria-expanded="false" aria-controls="more">More</button>
+    </div>
+    <div id="more" role="region" aria-label="More controls">
+      <h3>Type a cue</h3>
+      <input id="cue" type="text" maxlength="300" placeholder="Type a mood and press Enter" autocomplete="off" aria-label="Type a cue">
+      <div id="modePanel">
+        <h3>Camera mode</h3>
+        <label><input type="checkbox" id="mMirror" checked> Mirror (F)</label>
+        <label><input type="checkbox" id="mTrail"> Echo trail</label>
+        <label data-for="projection">Grow <input type="range" id="mGrow" min="0" max="30" value="8"> <span id="vGrow"></span></label>
+        <label>Feather <input type="range" id="mFeather" min="0" max="12" value="3"> <span id="vFeather"></span></label>
+        <div class="row" data-for="projection"><button class="btn" id="calBtn" type="button">Calibrate (C)</button></div>
+      </div>
+      <h3>Lyrics</h3>
+      <label>Effect <select id="effectSel" aria-label="Lyric effect"><option value="auto">Auto (matches scene)</option><option>rise</option><option>pop</option><option>neon</option><option>stamp</option><option>wave</option><option>type</option></select></label>
+      <h3>Show</h3>
+      <label><input type="checkbox" id="optInfo"> Stage info (which model made what)</label>
+      <label><input type="checkbox" id="optLat"> Latency readout (T)</label>
+      <div class="row"><button class="btn" id="demoBtn2" type="button">Watch the demo</button></div>
+    </div>
+    <div id="help" role="alertdialog" aria-labelledby="helpTitle"><h2 id="helpTitle"></h2><p id="helpText"></p><button class="btn" id="helpOk" type="button">Got it</button></div>
     <div id="prov" title="preset = premade, instant · Muse Spark = scene written live for your cue · Muse Image · new = backdrop generated live"></div>
     <div id="mood"></div>
     <div id="timing"></div>
@@ -183,9 +241,9 @@
   <div id="start">
     <div>
       <h1>AFTERGLOW</h1>
-      <p>Speak a cue and the stage answers: light and motion change at once, and a new backdrop drifts in a few seconds later.</p>
+      <p>Say a mood. The stage becomes it.</p>
       <button id="go">Enter the stage</button>
-      <small>Hold <span class="kbd">Space</span> for a command · <span class="kbd">L</span> lyrics (say or sing anything) · <span class="kbd">E</span> lyric effect · <span class="kbd">P</span> perform (camera echo) · <span class="kbd">M</span> mode · <span class="kbd">C</span> calibrate · <span class="kbd">F</span> mirror · <span class="kbd">T</span> latency · <span class="kbd">H</span> hide controls</small>
+      <small>No mic? Tap a mood instead. The camera is optional and only starts when you ask.</small>
     </div>
   </div>
 </div>
@@ -417,13 +475,22 @@ function setBackdrop(url) {
 // ---------------------------------------------------------------- HUD helpers
 function $(s) { return document.querySelector(s); }
 function escapeHtml(s) { return String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
-const LABELS = { ready: "ready", listening: "listening…", transcribing: "transcribing…", thinking: "shaping the scene…",
-  error: "hiccup", limited: "slow down", offline: "reconnecting…" };
+const LABELS = { ready: "Ready", listening: "Listening…", transcribing: "Catching your words…", thinking: "Shaping the scene…",
+  error: "Something slipped, try again", limited: "Give it a few seconds", offline: "Reconnecting…" };
+// Server and internal messages → plain language for the audience.
+function humanize(d) {
+  if (!d) return d;
+  if (/daily budget reached/i.test(d)) return /voice/i.test(d) ? "Live budget used up. Tap a mood or type one instead"
+    : /lyrics/i.test(d) ? "Live budget used up, lyrics paused" : /ghost|perform/i.test(d) ? "Live budget used up, snapshots paused"
+    : "Live budget used up, using offline moods";
+  if (/too many cues/i.test(d)) return "Lots of cues at once. Give it a few seconds";
+  return d;
+}
 let statusTimer = null;
 function setStatus(state, detail) {
   const el = $("#status");
   el.dataset.state = state;
-  el.querySelector(".text").textContent = detail || LABELS[state] || state;
+  el.querySelector(".text").textContent = humanize(detail) || LABELS[state] || state;
   clearTimeout(statusTimer);
   if (state === "error" || state === "limited" || (state === "ready" && detail))
     statusTimer = setTimeout(() => setStatus("ready"), 5000);
@@ -475,7 +542,7 @@ function connect() {
   ws.onmessage = e => {
     let m; try { m = JSON.parse(e.data); } catch { return; }
     if (m.type === "hello") {
-      $("#status .mode").textContent = m.mode;
+      $("#status .mode").textContent = m.mode === "mock" ? "offline" : m.mode;
       stage.mode = m.mode;
       applyScene(m.scene); setBackdrop(m.backdrop); setProvenance("standby", "bank");
       ly.sceneStyle = m.scene.shader.style;
@@ -581,7 +648,8 @@ async function initMic() {
     return true;
   } catch (err) {
     console.warn("mic unavailable", err);
-    setStatus("error", "Mic unavailable. Type a cue instead.");
+    showHelp(err && err.name === "NotFoundError" ? "nomic" : "mic");
+    setStatus("error", "No microphone. Tap a mood instead.");
     return false;
   }
 }
@@ -590,14 +658,14 @@ async function pttDown() {
   if (!mic.ready && !(await initMic())) return;
   if (mic.ctx.state === "suspended") await mic.ctx.resume();
   mic.talking = true;
-  $("#ptt").classList.add("active"); $("#ptt").textContent = "Command…";
+  $("#ptt").classList.add("active"); $("#ptt span").textContent = "Listening…"; demoStop();
   wsSend(JSON.stringify({ type: "ptt_start" }));
   micRun();
 }
 function pttUp() {
   if (!mic.talking) return;
   mic.talking = false; mic.releasing = true;
-  $("#ptt").classList.remove("active"); $("#ptt").textContent = "Hold for command";
+  $("#ptt").classList.remove("active"); $("#ptt span").textContent = "Hold to speak";
   timing.release = performance.now(); timing.final = 0;
   setTimeout(() => {   // short tail so the last word isn't clipped
     if (mic.lyrics) {  // worklet keeps running for lyrics: just close the command
@@ -754,7 +822,7 @@ const echo = { mpCanvas: Object.assign(document.createElement('canvas'), { width
 function perfButton() {
   const b = $("#perform");
   b.setAttribute("aria-pressed", perf.on ? "true" : "false");
-  b.textContent = perf.on ? "Perform ●" : "Perform";
+  b.setAttribute("aria-label", perf.on ? "Camera on. Turn off the camera" : "Camera off. Turn on the camera (3 min per visitor)");
 }
 async function performOn() {
   if (perf.on) return;
@@ -763,19 +831,21 @@ async function performOn() {
       video: { width: { ideal: FRAME_W }, height: { ideal: FRAME_H }, frameRate: { ideal: 60, min: 24 }, facingMode: "user" } });
   } catch (err) {
     console.warn("camera unavailable", err);
-    setStatus("error", "Camera unavailable."); return;
+    const none = err && err.name === "NotFoundError";
+    showHelp(none ? "nocam" : "cam");
+    setStatus("error", none ? "No camera found" : "Camera is blocked"); return;
   }
   const v = $("#cam"); v.srcObject = perf.stream;
   // Some browsers never settle play() for a hidden/odd stream: don't let that hang Perform.
   await Promise.race([v.play().catch(() => {}), new Promise(r => setTimeout(r, 1500))]);
   perf.on = true; perfButton(); watchCameraFrames();
-  setStatus("thinking", "Loading the on-device segmenter…");
+  setStatus("thinking", "Loading body tracking (first time only)…");
   const [seg, dec] = await Promise.all([loadSegmenter(), loadDecoder()]);
   echo.seg = seg; perf.decode = dec;
   if (!perf.on) return;
   startSegmentLoop();
   stage.echo = seg ? "live · on-device" : "SAM only (delayed)";
-  setStatus("ready", seg ? "Real-time echo on." : "Real-time echo unavailable here; using SAM snapshots.");
+  setStatus("ready", seg ? "Camera on" : "Live tracking isn't available in this browser; using slower snapshots");
   setProvenance(null, null);
   snapshotLoop();
 }
@@ -1199,6 +1269,54 @@ function wireModes() {
   setMode("off");
 }
 
+// ---------------------------------------------------------------- first run: cues, chips, demo, help, More
+function sendCue(text, fromDemo) {
+  if (!fromDemo) demoStop();
+  wsSend(JSON.stringify({ type: "text_cue", text }));
+  setCaption(text, false); timing.release = performance.now(); timing.final = 0;
+  hideHint();
+}
+const DEMO_CUES = ["Make it feel like a rainy city at 3am", "Switch background mood to warm retro synth neon",
+  "Take us into deep space, slow and floating", "Misty forest at dawn, very calm", "Now set everything on fire, fast and loud",
+  "Cold arctic night with the northern lights", "Brighter, and a bit faster", "Drop us underwater, calm and blue"];
+const DEMO_GAP_MS = 11000;     // stays under the server's "6 quick cues, then one per 10 s" limit
+const demo = { on: false, i: 0, timer: null };
+function demoStep() {
+  if (!demo.on) return;
+  if (demo.i >= DEMO_CUES.length) { demoStop(); setStatus("ready", "Demo finished. Your turn: say a mood"); return; }
+  const text = DEMO_CUES[demo.i++];
+  $("#demoText").textContent = `Demo ${demo.i}/${DEMO_CUES.length} · “${text}”`;
+  sendCue(text, true);
+  demo.timer = setTimeout(demoStep, DEMO_GAP_MS);
+}
+function demoStart() { if (demo.on) return demoStop(); Object.assign(demo, { on: true, i: 0 }); $("#demoBar").classList.add("on"); moreOpen(false); demoStep(); }
+function demoStop() { if (!demo.on) return; demo.on = false; clearTimeout(demo.timer); $("#demoBar").classList.remove("on"); }
+const HELP = {
+  mic: ["Microphone is blocked", "To speak cues, click the lock or mic icon in the address bar, allow the microphone, then hold the mic button again. Until then, tap a mood or type one under More."],
+  nomic: ["No microphone found", "Plug one in and try again. Until then, tap a mood or type one under More."],
+  cam: ["Camera is blocked", "To use your silhouette on stage, click the lock or camera icon in the address bar, allow the camera, then press the camera button again. Everything else works without it."],
+  nocam: ["No camera found", "Connect a camera and press the camera button again. Everything else works without it."],
+};
+function showHelp(kind) { const [t, x] = HELP[kind]; $("#helpTitle").textContent = t; $("#helpText").textContent = x; $("#help").classList.add("on"); $("#helpOk").focus(); }
+let hintTimer = null;
+function showHint() {
+  const touch = matchMedia("(pointer: coarse)").matches;
+  $("#hint").textContent = touch ? "Hold the mic button to speak, or tap a mood" : "Hold Space or the mic button to speak, or tap a mood";
+  $("#hint").classList.remove("gone"); hintTimer = setTimeout(hideHint, 10000);
+}
+function hideHint() { clearTimeout(hintTimer); $("#hint").classList.add("gone"); }
+function moreOpen(on) { $("#more").classList.toggle("on", on); $("#moreBtn").setAttribute("aria-expanded", on ? "true" : "false"); }
+function wireFirstRun() {
+  document.querySelectorAll("#chips [data-cue]").forEach(b => b.addEventListener("click", () => sendCue(b.dataset.cue)));
+  $("#demoBtn").addEventListener("click", demoStart); $("#demoBtn2").addEventListener("click", demoStart);
+  $("#demoStop").addEventListener("click", demoStop);
+  $("#helpOk").addEventListener("click", () => $("#help").classList.remove("on"));
+  $("#moreBtn").addEventListener("click", () => moreOpen(!$("#more").classList.contains("on")));
+  $("#effectSel").addEventListener("change", e => { ly.effect = e.target.value; });
+  $("#optLat").addEventListener("change", e => $("#lat").classList.toggle("on", e.target.checked));
+  $("#optInfo").addEventListener("change", e => $("#hud").classList.toggle("stageinfo", e.target.checked));
+}
+
 // ---------------------------------------------------------------- input wiring
 function wireInput() {
   const btn = $("#ptt");
@@ -1208,6 +1326,8 @@ function wireInput() {
   const typing = () => document.activeElement === $("#cue");
   addEventListener("keydown", e => {
     if (typing()) return;
+    if (e.key === "Escape") { demoStop(); moreOpen(false); $("#help").classList.remove("on"); return; }
+    if (e.target.closest && e.target.closest("select, input, #more button, #chips button")) { if (e.code === "Space") return; }
     if (e.code === "Space") { e.preventDefault(); if (!e.repeat) pttDown(); return; }
     if (e.repeat) return;
     const k = e.key.toLowerCase();
@@ -1217,9 +1337,9 @@ function wireInput() {
     else if (k === "m") cycleMode();
     else if (k === "c") calOpen(!cal.open);
     else if (k === "f") { perf.mirror = !perf.mirror; $("#mMirror").checked = perf.mirror; saveModes(); }
-    else if (k === "t") $("#lat").classList.toggle("on");
+    else if (k === "t") { $("#lat").classList.toggle("on"); $("#optLat").checked = $("#lat").classList.contains("on"); }
     else if (k === "e") {
-      ly.effect = EFFECTS[(EFFECTS.indexOf(ly.effect) + 1) % (EFFECTS.length + 1)] || "auto";
+      ly.effect = EFFECTS[(EFFECTS.indexOf(ly.effect) + 1) % (EFFECTS.length + 1)] || "auto"; $("#effectSel").value = ly.effect;
       setStatus("ready", `Lyric effect: ${ly.effect === "auto" ? `auto (${effectNow()})` : ly.effect}`);
     }
   });
@@ -1232,7 +1352,7 @@ function wireInput() {
   $("#cue").addEventListener("keydown", e => {
     if (e.key === "Enter") {
       const text = e.target.value.trim();
-      if (text) { wsSend(JSON.stringify({ type: "text_cue", text })); setCaption(text, false); timing.release = performance.now(); timing.final = 0; }
+      if (text) sendCue(text);
       e.target.value = ""; e.target.blur();
     } else if (e.key === "Escape") e.target.blur();
   });
@@ -1243,11 +1363,11 @@ function wireInput() {
 try { initGL(); } catch (err) { console.warn("WebGL unavailable; backdrop-only mode", err); fx.gl = null; }
 resize(); addEventListener("resize", resize);
 requestAnimationFrame(frame);
-wireInput(); wireModes();
+wireInput(); wireModes(); wireFirstRun();
 connect();
 $("#go").addEventListener("click", async () => {
   $("#start").remove();
-  await initMic();   // ask for the mic now, so the first push-to-talk isn't lost to the permission prompt
+  showHint();        // the mic is requested on first use (mic button / Lyrics), not here: chips work without it
   // Warm the on-device segmenter (~15 MB, cached afterwards) so Perform starts instantly.
   // Skipped on small screens and data-saver connections; there it loads on first Perform.
   const saveData = navigator.connection && navigator.connection.saveData;
