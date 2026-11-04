@@ -60,9 +60,50 @@ CANNED_LYRICS = [
 ]
 
 
+# An INVENTED song for testing Song mode offline. Placeholder title, invented lines; not a real song.
+MOCK_SONG_TITLE, MOCK_SONG_ARTIST = "Placeholder Song", "Nobody in Particular"
+MOCK_SONG_LINES = [
+    "paper boats on a copper river",
+    "we were counting the lanterns twice",
+    "hold the evening in your pocket",
+    "marmalade skies are calling us home",
+    "oh the clocks are all sleeping",
+    "marmalade skies are calling us home",
+    "gather the lanterns again",
+]
+MOCK_WORD_S, MOCK_GAP_S = 0.32, 1.4      # pacing of the mock singer (tests shorten these)
+
+
+def mock_song_lrc() -> list[tuple[float, str]]:
+    """Timestamps consistent with how MockLyricsSession paces its lines."""
+    out, t = [], 2.0
+    for line in MOCK_SONG_LINES:
+        out.append((t, line))
+        t += len(line.split()) * MOCK_WORD_S + MOCK_GAP_S
+    return out
+
+
+class MockSongIdentifier:
+    name = "mock"
+
+    async def identify(self, heard: str):
+        from ..song import Identification, similarity
+        if any(similarity(heard, l) >= 0.5 or l in heard.lower() for l in MOCK_SONG_LINES):
+            return Identification(MOCK_SONG_TITLE, MOCK_SONG_ARTIST, 0.9)
+        return None
+
+
+class MockLyricsSource:
+    name = "mock"
+
+    async def find(self, title: str, artist: str):
+        return mock_song_lrc() if title == MOCK_SONG_TITLE else None
+
+
 class MockLyricsSession:
     """Offline lyrics stream: while audio keeps arriving, emits a canned line word by word
-    in the same event shapes as ENDPOINTING mode (transcript partials, speechComplete)."""
+    in the same event shapes as ENDPOINTING mode (transcript partials, speechComplete).
+    `sing_song()` switches it from the canned lines to the invented song."""
 
     name = "mock"
 
@@ -71,6 +112,10 @@ class MockLyricsSession:
         self.audio_bytes = 0
         self._last_audio = 0.0
         self._task: asyncio.Task | None = None
+        self.source = CANNED_LYRICS
+
+    def sing_song(self) -> None:
+        self.source = MOCK_SONG_LINES
 
     async def start(self) -> None:
         self._task = asyncio.create_task(self._run())
@@ -81,17 +126,19 @@ class MockLyricsSession:
 
     async def _run(self) -> None:
         turn = 0
-        for line in itertools.cycle(CANNED_LYRICS):
+        while True:
+            src = self.source
+            line = src[turn % len(src)]
             words = line.split()
             await self.on_event({"type": "speechStart", "turnId": turn})
             for n in range(1, len(words) + 1):
                 while time.monotonic() - self._last_audio > 0.5:  # paused: no mic audio
                     await asyncio.sleep(0.1)
-                await asyncio.sleep(0.32)
+                await asyncio.sleep(MOCK_WORD_S)
                 await self.on_event({"type": "transcript", "final": False, "transcript": " ".join(words[:n])})
             await self.on_event({"type": "speechComplete", "turnId": turn, "transcript": line})
             turn += 1
-            await asyncio.sleep(1.4)
+            await asyncio.sleep(MOCK_GAP_S)
 
     def stop(self) -> None:
         if self._task:

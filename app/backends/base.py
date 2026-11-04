@@ -30,6 +30,20 @@ class ASRSession(Protocol):
     async def close(self) -> None: ...
 
 
+class SongIdentifier(Protocol):
+    name: str
+
+    async def identify(self, heard: str):
+        """Heard words → song_mode.Identification, or None if not recognised. Never returns lyrics."""
+
+
+class LyricsSource(Protocol):
+    name: str
+
+    async def find(self, title: str, artist: str) -> list[tuple[float, str]] | None:
+        """Time-synced lines [(seconds, line)], or None."""
+
+
 @dataclass
 class SceneResult:
     scene: Scene

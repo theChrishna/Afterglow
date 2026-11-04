@@ -28,7 +28,8 @@ class TokenBucket:
 
 
 class Limits:
-    KINDS = {"cue": config.LIMIT_CUES, "image": config.LIMIT_IMAGES, "sam": config.LIMIT_SAM}
+    KINDS = {"cue": config.LIMIT_CUES, "image": config.LIMIT_IMAGES, "sam": config.LIMIT_SAM,
+             "song": config.LIMIT_SONG}
 
     def __init__(self, daily_budget: float = config.DAILY_BUDGET_USD,
                  perform_seconds: int = config.PERFORM_SECONDS_PER_IP):

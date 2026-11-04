@@ -45,6 +45,22 @@ def segmenter(live: bool):
     return MockSegmenter()
 
 
+def song_identifier(live: bool):
+    if live and not config.MOCK:
+        from .meta_api import MetaSongIdentifier
+        return MetaSongIdentifier()
+    from .mock import MockSongIdentifier
+    return MockSongIdentifier()
+
+
+def lyrics_source(live: bool):
+    if live and not config.MOCK:
+        from .lrclib import LRCLibSource
+        return LRCLibSource()
+    from .mock import MockLyricsSource
+    return MockLyricsSource()
+
+
 def lyrics_session(on_event, live: bool):
     if live and not config.MOCK:
         from .meta_api import MetaASRSession

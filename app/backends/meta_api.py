@@ -363,3 +363,77 @@ class MetaSegmenter:
         log_stage("sam", ms, True, self.name, matches=0 if result is None else result["objects"],
                   server_decode_ms=None if result is None else result.get("decode_ms"))
         return result
+
+
+# ------------------------------------------------------------------ Song identification (Muse Spark)
+
+SONG_JSON_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "title": {"type": ["string", "null"]},
+        "artist": {"type": ["string", "null"]},
+        "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+    },
+    "required": ["title", "artist", "confidence"],
+    "additionalProperties": False,
+}
+
+_SONG_PROMPT = (
+    "You help a stage show recognise a song that is playing in the room. You get words a speech "
+    "recogniser heard (it may be noisy or partly wrong). If you recognise the song they come from, "
+    "answer with its title and main artist and your confidence 0-1. If you do not recognise it, or "
+    "the words are ordinary speech, answer title null, artist null, confidence 0. Never guess to be "
+    "helpful and never output any lyrics: only the title, the artist and the number."
+)
+
+
+class MetaSongIdentifier:
+    """Asks Spark who sings the heard words. Output is validated by song.parse_identification;
+    anything unexpected counts as 'not recognised'."""
+
+    name = "meta_api"
+
+    def __init__(self):
+        self.strict = True
+
+    async def identify(self, heard: str):
+        from ..song import parse_identification
+        body = {
+            "model": config.SPARK_MODEL,
+            "reasoning_effort": "minimal",
+            "messages": [{"role": "system", "content": _SONG_PROMPT},
+                         {"role": "user", "content": heard[:600]}],
+        }
+        cost = 0.0
+        try:
+            for attempt in (1, 2):
+                body["response_format"] = {"type": "json_schema", "json_schema": {
+                    "name": "SongGuess", "schema": SONG_JSON_SCHEMA, "strict": self.strict}}
+                t0 = time.perf_counter()
+                try:
+                    r = await http().post("/chat/completions", json=body, timeout=config.TIMEOUT_SPARK)
+                except httpx.HTTPError as e:
+                    log_stage("song_id", (time.perf_counter() - t0) * 1000, False, self.name,
+                              attempt=attempt, error=_err(e))
+                    continue
+                if r.status_code == 400 and self.strict and "strict" in r.text.lower():
+                    self.strict = False
+                    continue
+                if r.status_code != 200:
+                    log_stage("song_id", (time.perf_counter() - t0) * 1000, False, self.name,
+                              attempt=attempt, error=f"HTTP {r.status_code}")
+                    continue
+                j = r.json()
+                usage = j.get("usage") or {}
+                cost += (usage.get("prompt_tokens", 0) * config.PRICE_SPARK_IN
+                         + usage.get("completion_tokens", 0) * config.PRICE_SPARK_OUT)
+                content = ((j.get("choices") or [{}])[0].get("message") or {}).get("content") or ""
+                ident = parse_identification(content)
+                log_stage("song_id", (time.perf_counter() - t0) * 1000, True, self.name,
+                          attempt=attempt, recognised=ident is not None)   # never log titles/lyrics
+                return ident
+            return None
+        finally:
+            if cost:
+                from ..limits import limits
+                limits.charge("spark", cost)

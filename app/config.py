@@ -54,8 +54,15 @@ DAILY_BUDGET_USD = float(os.environ.get("DAILY_BUDGET_USD", "5"))
 LIMIT_CUES = (6, 10.0)        # 6 burst, then 1 per 10 s
 LIMIT_IMAGES = (1, 60.0)      # 1 per minute
 LIMIT_SAM = (1, 3.0)          # 1 per 3 s
+LIMIT_SONG = (1, 20.0)        # Song mode: one identification try per 20 s per IP
 PERFORM_SECONDS_PER_IP = int(os.environ.get("PERFORM_SECONDS_PER_IP", "180"))
 LYRICS_SECONDS_PER_IP = int(os.environ.get("LYRICS_SECONDS_PER_IP", "1200"))  # 20 min of audio
+
+# Song mode (experimental, off unless the server sets SONG_MODE=1)
+SONG_MODE = os.environ.get("SONG_MODE", "0") == "1"
+SONG_MAX_ATTEMPTS = 4          # identification tries per session
+LRCLIB_BASE = "https://lrclib.net"
+LRCLIB_UA = "Afterglow-hackathon/0.1 (github.com/theChrishna/Afterglow)"   # descriptive; no personal data
 
 # Timeouts (s)
 TIMEOUT_ASR_CONNECT = 6
@@ -63,6 +70,7 @@ TIMEOUT_ASR_FINAL = 8
 TIMEOUT_SPARK = 10
 TIMEOUT_IMAGE = 45
 TIMEOUT_SAM = 15
+TIMEOUT_LRCLIB = 6
 
 # PTT strategy: "buffered" = connect on press and buffer audio until ack;
 # "spare" = keep one pre-connected session alive with silence (fallback).
