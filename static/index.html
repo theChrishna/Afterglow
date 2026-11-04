@@ -133,6 +133,7 @@
   #leaders line { stroke: rgba(255,244,255,.5); stroke-width: 1; }
   .hud-on #hand.live #hcur, .hud-on #hand.live #hxy, .hud-on #leaders.live { display: block; }
   #lookBtn { border-color: rgba(231,77,158,.5); }
+  #soundBtn .wave { display: none; } #soundBtn[aria-pressed="true"] .wave { display: inline; } #soundBtn[aria-pressed="true"] .mute { display: none; }
   #lat { position: absolute; right: 12px; top: 12px; z-index: 9; display: none; padding: 8px 10px; border-radius: 8px; background: rgba(0,0,0,.6); color: #9f9; font: 11px/1.45 ui-monospace, Menlo, monospace; white-space: pre; pointer-events: none; }
   #lat.on { display: block; }
 
@@ -181,7 +182,7 @@
   #start button:hover { background: #b02e74; }
   #start small { display: block; margin-top: 14px; color: var(--ui-dim); }
   .kbd { display: inline-block; padding: 0 6px; border: 1px solid rgba(255,255,255,.35); border-radius: 4px; font-size: 12px; }
-  @media (max-width: 560px) { #mood { display: none; } .btn { padding: 0 10px; font-size: 11px; letter-spacing: .08em; } #ptt { flex: 1 1 100%; }
+  @media (max-width: 560px) { #mood { display: none; } .btn { padding: 0 8px; font-size: 11px; letter-spacing: .08em; } #ptt { flex: 1 1 100%; }
     #controls { gap: 6px; }
     #chips { bottom: calc(132px + env(safe-area-inset-bottom)); flex-wrap: nowrap; overflow-x: auto; justify-content: flex-start; scrollbar-width: none;
       -webkit-mask-image: linear-gradient(90deg, #000 85%, transparent); mask-image: linear-gradient(90deg, #000 85%, transparent); }
@@ -238,6 +239,7 @@
       <button id="lookBtn" class="btn" type="button" aria-label="Look: Reel. Switch to Classic">Reel</button>
       <button id="modeBtn" class="btn" aria-pressed="false" title="Performance mode: Off / Composite / Projection (M)">Mode</button>
       <button id="perform" class="btn icon" aria-pressed="false" aria-label="Camera off. Turn on the camera (3 min per visitor)" title="Camera (P)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7h3l2-3h8l2 3h3v13H3z"/><circle cx="12" cy="13" r="4"/></svg></button>
+      <button id="soundBtn" class="btn icon" type="button" aria-pressed="false" aria-label="Ambient sound off. Turn it on" title="Ambient sound (S)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9h4l5-4v14l-5-4H4z"/><path class="wave" d="M16.5 8.5a5 5 0 0 1 0 7M19 6a8.5 8.5 0 0 1 0 12"/><path class="mute" d="M17 9l5 6M22 9l-5 6"/></svg></button>
       <button id="moreBtn" class="btn" aria-expanded="false" aria-controls="more">More</button>
     </div>
     <div id="more" role="region" aria-label="More controls">
@@ -297,6 +299,7 @@ function applyScene(s) {
   tgt.intensity = s.lighting.intensity; tgt.warmth = s.lighting.warmth; tgt.bpm = s.lighting.pulse_bpm;
   tgt.speed = s.shader.speed; tgt.grain = s.shader.grain;
   const idx = look.room ? ROOM_STYLE : Math.max(0, STYLES.indexOf(s.shader.style));
+  amb.style = idx; amb.target = { intensity: s.lighting.intensity, warmth: s.lighting.warmth, bpm: s.lighting.pulse_bpm }; ambUpdate();
   if (style.mix > 0) style.queued = idx;          // finish the running crossfade first
   else if (idx !== style.a) { style.b = idx; style.mix = 0.0001; }
   const root = document.documentElement.style;
@@ -1494,6 +1497,7 @@ function lookChanged() {
   $("#stage").classList.toggle("room", look.room); $("#stage").classList.toggle("hud-on", look.hud);
   $("#lyrics").style.display = look.lyrics === "hand" ? "none" : ""; $("#hand").style.display = look.lyrics === "hand" ? "" : "none";
   const want = look.room ? ROOM_STYLE : Math.max(0, STYLES.indexOf(ly.sceneStyle));
+  amb.style = want; ambUpdate();
   if (!lookChanged.done) { style.a = style.b = want; style.mix = 0; lookChanged.done = true; }
   else if (style.mix > 0) style.queued = want; else if (want !== style.a) { style.b = want; style.mix = 0.0001; }
   const reel = look.preset === "reel";
@@ -1522,6 +1526,49 @@ function wireLook() {
   $("#optHud").addEventListener("change", e => set("hud", e.target.checked));
   $("#optLight").addEventListener("change", e => set("lightOn", e.target.checked));
   lookChanged();
+}
+
+// ---------------------------------------------------------------- Ambient tone (off by default)
+// A soft Web Audio pad: root + fifth + octave through a breathing low-pass. The scene sets the key
+// (per style), brightness (intensity), a step up for cold scenes, and a gentle pulse at the scene's bpm.
+const AMB_ROOTS = [57, 50, 52, 55, 48, 45, 53];   // MIDI root per style: grid, rain, nebula, smoke, aurora, embers, room
+const amb = { ctx: null, on: false, style: 2, target: { intensity: .55, warmth: -.2, bpm: 0 }, oscs: [] };
+function ambBuild() {
+  const ctx = new (window.AudioContext || window.webkitAudioContext)();
+  const master = ctx.createGain(); master.gain.value = 0;
+  const filt = ctx.createBiquadFilter(); filt.type = "lowpass"; filt.Q.value = 0.6; filt.frequency.value = 900;
+  const trem = ctx.createGain(); trem.gain.value = 1;
+  filt.connect(trem).connect(master).connect(ctx.destination);
+  amb.oscs = [[1, "sine", .5], [1.5, "triangle", .22], [2, "sine", .16], [1.004, "sawtooth", .05]].map(([r, type, level]) => {
+    const o = ctx.createOscillator(), g = ctx.createGain(); o.type = type; g.gain.value = level; o.connect(g).connect(filt); o.start(); return { o, r };
+  });
+  const lfo = ctx.createOscillator(), lfoG = ctx.createGain(); lfo.frequency.value = 0.07; lfoG.gain.value = 160;
+  lfo.connect(lfoG).connect(filt.frequency); lfo.start();
+  const pulse = ctx.createOscillator(), pulseG = ctx.createGain(); pulse.frequency.value = 1; pulseG.gain.value = 0;
+  pulse.connect(pulseG).connect(trem.gain); pulse.start();
+  Object.assign(amb, { ctx, master, filt, pulse, pulseG });
+}
+function ambUpdate(snap) {
+  if (!amb.on || !amb.ctx) return;
+  const t = amb.ctx.currentTime, { intensity, warmth, bpm } = amb.target;
+  const midi = AMB_ROOTS[amb.style] + (warmth < -0.3 ? 2 : 0) - 12;
+  const f0 = 440 * Math.pow(2, (midi - 69) / 12);
+  amb.oscs.forEach(({ o, r }) => snap ? o.frequency.setValueAtTime(f0 * r, t) : o.frequency.setTargetAtTime(f0 * r, t, 1.2));
+  amb.filt.frequency.setTargetAtTime(320 + 1700 * intensity, t, 1.5);
+  amb.pulse.frequency.setTargetAtTime(bpm > 1 ? bpm / 60 : 1, t, 0.5);
+  amb.pulseG.gain.setTargetAtTime(bpm > 1 ? 0.22 : 0, t, 0.8);
+}
+function ambToggle() {
+  amb.on = !amb.on;
+  const b = $("#soundBtn"); b.setAttribute("aria-pressed", amb.on ? "true" : "false");
+  b.setAttribute("aria-label", amb.on ? "Ambient sound on. Mute it" : "Ambient sound off. Turn it on");
+  if (amb.on) {
+    const fresh = !amb.ctx; if (fresh) ambBuild();
+    amb.ctx.resume(); ambUpdate(fresh); amb.master.gain.setTargetAtTime(0.1, amb.ctx.currentTime, 0.8);
+  } else if (amb.ctx) {
+    amb.master.gain.setTargetAtTime(0, amb.ctx.currentTime, 0.25);
+    setTimeout(() => { if (!amb.on) amb.ctx.suspend(); }, 1500);
+  }
 }
 
 // ---------------------------------------------------------------- first run: cues, chips, demo, help, More
@@ -1592,6 +1639,7 @@ function wireInput() {
     else if (k === "m") cycleMode();
     else if (k === "c") calOpen(!cal.open);
     else if (k === "f") { perf.mirror = !perf.mirror; $("#mMirror").checked = perf.mirror; saveModes(); }
+    else if (k === "s") ambToggle();
     else if (k === "t") { $("#lat").classList.toggle("on"); $("#optLat").checked = $("#lat").classList.contains("on"); }
     else if (k === "e") {
       ly.effect = EFFECTS[(EFFECTS.indexOf(ly.effect) + 1) % (EFFECTS.length + 1)] || "auto"; $("#effectSel").value = ly.effect;
@@ -1619,6 +1667,7 @@ try { initGL(); } catch (err) { console.warn("WebGL unavailable; backdrop-only m
 resize(); addEventListener("resize", resize);
 requestAnimationFrame(frame);
 wireInput(); wireModes(); wireFirstRun(); wireLook();
+$("#soundBtn").addEventListener("click", ambToggle);
 connect();
 $("#go").addEventListener("click", async () => {
   $("#start").remove();

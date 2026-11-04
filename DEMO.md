@@ -45,7 +45,7 @@ which plays cues 1–8 here, 11 s apart, with a caption (Stop or Esc ends it).
 - **M** cycles Off → Composite → Projection. Composite puts the performer, cut out, onto the stage.
   Projection blacks out the performer's silhouette so a projector doesn't light them.
 - In Projection, press **C** to calibrate: drag the 4 corners onto the stage, then adjust offset and scale.
-- **F** mirror, **T** latency readout, **L** lyrics, **P** camera, **H** hide controls, **Esc** stop the demo.
+- **F** mirror, **T** latency readout, **L** lyrics, **P** camera, **S** ambient sound (off by default), **H** hide controls, **Esc** stop the demo.
 
 ## If something goes wrong
 

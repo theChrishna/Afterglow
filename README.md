@@ -84,7 +84,13 @@ per-frame cost. Settings are saved in this browser's localStorage.
 
 Everything has an on-screen control; keys are optional. **Space** hold to speak · **L** lyrics ·
 **P** camera · **M** mode · **C** calibrate · **F** mirror · **E** kinetic lyric effect ·
-**T** latency readout · **H** hide controls · **Esc** stop demo / close panels.
+**T** latency readout · **S** ambient sound · **H** hide controls · **Esc** stop demo / close panels.
+
+**Ambient sound** (speaker button, off by default, never saved as on): a soft Web Audio pad, with
+no audio files. The scene sets its key (per style, a step higher for cold scenes) and brightness
+(intensity), and it pulses gently at the scene's bpm. Use headphones or keep it low while Lyrics is
+on: the mic's echo cancellation should keep the pad out of the transcript, but that wasn't tested
+with real speakers.
 
 ## Latency
 
