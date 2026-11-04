@@ -125,6 +125,17 @@
   #ghost { mix-blend-mode: difference; }
   #ghost.neon { mix-blend-mode: screen; }
   #backdrop { transition: filter 1.6s ease, opacity 1.2s ease; }
+  /* Overlay: the live camera is the base layer; the ambience is projected over it as light. */
+  #camlayer { position: absolute; inset: 0; width: 100%; height: 100%; display: none; background: #000; }
+  .ov #camlayer { display: block; }
+  .ov:not(.room) #backdrop, .ov #fx { opacity: var(--ov, .55); mix-blend-mode: var(--ovblend, screen); }
+  .ov #backdrop { transition: filter 1.6s ease; }
+  #camPrompt { position: absolute; left: 50%; top: calc(54px + env(safe-area-inset-top)); transform: translateX(-50%); display: none; align-items: center; gap: 10px;
+    padding: 4px 4px 4px 14px; border: 1px solid rgba(231,77,158,.6); border-radius: 999px; background: var(--glass); backdrop-filter: blur(10px);
+    font-size: 13px; max-width: calc(100% - 32px); z-index: 5; }
+  #camPrompt.on { display: flex; } #camPrompt .btn { min-height: 36px; padding: 0 12px; }
+  #ovCtl { display: none; } #ovCtl.on { display: block; }
+  #ovCtl .opts { display: flex; gap: 14px; flex-wrap: wrap; } #ovCtl input[type=radio] { accent-color: var(--accent); width: 18px; height: 18px; }
   .room #backdrop { opacity: 0; }
   /* Handwritten lyrics: follow the performer's head, letter by letter. */
   #hand { position: absolute; left: 0; top: 0; z-index: 3; width: max-content; max-width: min(40vw, 440px); pointer-events: none; }
@@ -189,8 +200,8 @@
   #start button:hover { background: #b02e74; }
   #start small { display: block; margin-top: 14px; color: var(--ui-dim); }
   .kbd { display: inline-block; padding: 0 6px; border: 1px solid rgba(255,255,255,.35); border-radius: 4px; font-size: 12px; }
-  @media (max-width: 560px) { #mood { display: none; } .btn { padding: 0 8px; font-size: 11px; letter-spacing: .08em; } #ptt { flex: 1 1 100%; }
-    #controls { gap: 6px; } #ambSwitch { flex: 1 1 100%; order: 1; } .segb { flex: 1; }
+  @media (max-width: 560px) { #mood { display: none; } .btn { padding: 0 7px; font-size: 11px; letter-spacing: .03em; } #ptt { flex: 1 1 100%; }
+    #controls { gap: 4px; } #ambSwitch { flex: 1 1 100%; order: 1; } .segb { flex: 1; }
     #lyricsBtn, #lookBtn, #modeBtn, #perform, #soundBtn, #moreBtn { order: 2; }   /* mic row, then the switch, then the buttons */
     #chips { bottom: calc(184px + env(safe-area-inset-bottom)); flex-wrap: nowrap; overflow-x: auto; justify-content: flex-start; scrollbar-width: none;
       -webkit-mask-image: linear-gradient(90deg, #000 85%, transparent); mask-image: linear-gradient(90deg, #000 85%, transparent); }
@@ -201,6 +212,7 @@
 </head>
 <body>
 <div id="stage">
+  <canvas id="camlayer"></canvas>
   <div id="backdrop"><div class="bd"></div><div class="bd"></div></div>
   <canvas id="fx"></canvas>
   <canvas id="comp"></canvas>
@@ -229,6 +241,7 @@
     <div class="brand">AFTERGLOW</div>
     <div id="status" data-state="offline"><span class="dot"></span><span class="text">connecting…</span><span class="mode"></span></div>
     <div id="caption"></div>
+    <div id="camPrompt" role="status"><span>Turn on the camera to overlay the stage on your room</span><button class="btn" id="camPromptBtn" type="button">Turn on camera</button></div>
     <div id="demoBar" role="status"><span id="demoText"></span><button class="btn" id="demoStop" type="button">Stop</button></div>
     <div id="hint" class="gone"></div>
     <div id="chips" role="group" aria-label="Moods">
@@ -261,6 +274,13 @@
         <h3>Camera ambience</h3>
         <label><input type="checkbox" id="mMirror" checked> Mirror (F)</label>
         <label><input type="checkbox" id="mTrail"> Echo trail (Replace)</label>
+        <div id="ovCtl">
+          <label>Ambience strength <input type="range" id="ovStrength" min="10" max="90" value="55" aria-label="Ambience strength"> <span id="vOv">55%</span></label>
+          <div class="opts" role="radiogroup" aria-label="Light on the performer">
+            <label><input type="radio" name="ovClear" id="ovLight" value="light" checked> Light on me</label>
+            <label><input type="radio" name="ovClear" id="ovClear" value="clear"> Keep me clear</label>
+          </div>
+        </div>
       </div>
       <h3>Look</h3>
       <div class="row"><button class="btn" id="presetReel" type="button">Reel look</button><button class="btn" id="presetClassic" type="button">Classic</button></div>
@@ -489,7 +509,7 @@ function initGL() {
 }
 const RENDER_SCALE = 0.6;
 function resize() {
-  for (const c of [$("#fx"), $("#ghost"), $("#comp")]) {
+  for (const c of [$("#fx"), $("#ghost"), $("#comp"), $("#camlayer")]) {
     const s = c.id === "fx" ? RENDER_SCALE * Math.min(devicePixelRatio || 1, 1.5) : 1;
     c.width = Math.max(1, Math.round(innerWidth * s)); c.height = Math.max(1, Math.round(innerHeight * s));
   }
@@ -514,6 +534,7 @@ function frame(now) {
   }
   segmentLive(now);
   updateLatHud(now);
+  ovApply(now); if (ovOn) drawCamLayer();
   drawComp(now);
   drawGhosts(now, dt);
   if (look.lyrics === "hand") handTick(now, dt); else placeLyrics(dt);
@@ -1217,7 +1238,7 @@ function drawGhosts(now, dt) {
   ctx.clearRect(0, 0, W, H);
   if (perf.mirror) ctx.setTransform(-1, 0, 0, 1, W, 0);
 
-  const md = effMode();        // projection: no light on the performer, so no echo/glow at all
+  const md = effMode() === "overlay" ? "composite" : effMode();   // projection: no light on the performer, so no echo/glow at all
   // 1) SAM snapshots: crisp silhouettes released into a slow rise-and-fade afterglow.
   perf.ghosts = perf.ghosts.filter(g => now - g.born < 9000);
   for (const g of md === "off" && look.echo === "ghost" ? perf.ghosts : []) {
@@ -1281,14 +1302,52 @@ function drawGhosts(now, dt) {
 // projection = black live silhouette over the performer (scenery everywhere else, no light on the person).
 // modes.mode: off | composite ("Replace" in the UI) | overlay | projection. modes.amb remembers the chosen
 // ambience (composite or overlay); the active mode itself always starts Off (no auto camera prompt).
-const modes = { mode: "off", amb: "composite", grow: 8, feather: 3, trail: false };
+const modes = { mode: "off", amb: "composite", grow: 8, feather: 3, trail: false, strength: 0.55, keepClear: false };
 try { Object.assign(modes, JSON.parse(localStorage.getItem("afterglow.modes") || "{}"), { mode: "off" }); } catch {}
 if (modes.amb !== "overlay") modes.amb = "composite";
-function saveModes() { try { localStorage.setItem("afterglow.modes", JSON.stringify({ amb: modes.amb, grow: modes.grow, feather: modes.feather, trail: modes.trail, mirror: perf.mirror })); } catch {} }
+modes.strength = Math.min(0.9, Math.max(0.1, +modes.strength || 0.55)); modes.keepClear = !!modes.keepClear;
+function saveModes() { try { localStorage.setItem("afterglow.modes", JSON.stringify({ amb: modes.amb, strength: modes.strength, keepClear: modes.keepClear, grow: modes.grow, feather: modes.feather, trail: modes.trail, mirror: perf.mirror })); } catch {} }
 try { const sv = JSON.parse(localStorage.getItem("afterglow.modes") || "{}"); if (typeof sv.mirror === "boolean") perf.mirror = sv.mirror; } catch {}
 const MODE_NAMES = { off: "Off", composite: "Replace", overlay: "Overlay", projection: "Projection" };
-// The mode actually drawn. Overlay is rendered like Replace until the camera layer exists (next step).
-const effMode = () => modes.mode === "overlay" ? "composite" : modes.mode;
+// The mode actually drawn. Overlay needs live camera frames; until then it falls back to Replace's look
+// (the ambience on its own), so the screen is never blank.
+// Blend: `screen` reads as projected light in a dark room but turns a bright wall white; `soft-light` keeps a
+// bright room's detail but shows almost nothing in a dark one. So it is picked from the room's brightness
+// (sampled twice a second from a 16x9 copy of the camera, with hysteresis), and soft-light gets a boost.
+const OV_SOFT_BOOST = 1.5;
+const lum = { cv: canvas2(16, 9), at: 0, v: 0.3, blend: "screen" };
+const OV_CLEAR_ALPHA = 0.85;          // Keep me clear: how strongly the real person is drawn back over the ambience
+const camReady = () => perf.on && $("#cam").readyState >= 2 && $("#cam").videoWidth > 0;
+const effMode = () => modes.mode === "overlay" ? (camReady() ? "overlay" : "composite") : modes.mode;
+let ovOn = false;
+function ovLook(now) {               // choose the blend from the room's brightness; update the strength variable
+  if (now - lum.at > 500) {
+    lum.at = now;
+    const c = lum.cv.getContext("2d", { willReadFrequently: true }); c.drawImage($("#cam"), 0, 0, 16, 9);
+    const d = c.getImageData(0, 0, 16, 9).data; let sum = 0;
+    for (let i = 0; i < d.length; i += 4) sum += 0.2126 * d[i] + 0.7152 * d[i + 1] + 0.0722 * d[i + 2];
+    lum.v = lum.v * 0.5 + (sum / (d.length / 4) / 255) * 0.5;
+    const b = lum.blend === "screen" ? (lum.v > 0.5 ? "soft-light" : "screen") : (lum.v < 0.38 ? "screen" : "soft-light");   // hysteresis
+    if (b !== lum.blend) lum.blend = b;
+  }
+  const st = $("#stage").style;
+  st.setProperty("--ovblend", lum.blend);
+  st.setProperty("--ov", lum.blend === "soft-light" ? Math.min(1, modes.strength * OV_SOFT_BOOST) : modes.strength);
+}
+function ovApply(now) {              // CSS class + variables only when something changed
+  const want = effMode() === "overlay";
+  if (want !== ovOn) { ovOn = want; $("#stage").classList.toggle("ov", want); }
+  if (want) ovLook(now);
+  $("#camPrompt").classList.toggle("on", modes.mode === "overlay" && !perf.on);
+}
+function drawCamLayer() {
+  const cv = $("#camlayer"), ctx = cv.getContext("2d"), v = $("#cam"), W = cv.width, H = cv.height;
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.fillStyle = "#000"; ctx.fillRect(0, 0, W, H);
+  const { s, ox, oy } = frameRect(W, H, v.videoWidth, v.videoHeight);        // same mapping as the mask, so layers line up
+  ctx.setTransform(perf.mirror ? -1 : 1, 0, 0, 1, perf.mirror ? W : 0, 0);
+  ctx.imageSmoothingQuality = "low"; ctx.drawImage(v, ox, oy, v.videoWidth * s, v.videoHeight * s);
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+}
 function setMode(m) {
   modes.mode = m;
   $("#modeBtn").setAttribute("aria-pressed", m === "off" ? "false" : "true");
@@ -1296,6 +1355,7 @@ function setMode(m) {
   if (m === "composite" || m === "overlay") { modes.amb = m; saveModes(); }
   document.querySelectorAll("#ambSwitch .segb").forEach(b => b.setAttribute("aria-checked", b.dataset.amb === modes.amb ? "true" : "false"));
   $("#projBtn").setAttribute("aria-pressed", m === "projection" ? "true" : "false");
+  $("#ovCtl").classList.toggle("on", modes.amb === "overlay" && m !== "projection");
   if (m !== "projection" && cal.open) calOpen(false);
   if (m === "off") $("#comp").getContext("2d").clearRect(0, 0, $("#comp").width, $("#comp").height);
   if (m !== "off" && !perf.on) performOn();
@@ -1306,12 +1366,12 @@ const comp = { tmp: canvas2(2, 2), tmp2: canvas2(2, 2) };
 function drawComp(now) {
   const cv = $("#comp"), ctx = cv.getContext("2d"), W = cv.width, H = cv.height;
   const em = effMode();
-  if (em === "off" || (em === "projection" && look.lightOn) || !perf.on || !echo.live || now - echo.lastSegAt > 1000) { if (comp.dirty) { ctx.clearRect(0, 0, W, H); comp.dirty = false; } return; }
+  if (em === "off" || (em === "overlay" && !modes.keepClear) || (em === "projection" && look.lightOn) || !perf.on || !echo.live || now - echo.lastSegAt > 1000) { if (comp.dirty) { ctx.clearRect(0, 0, W, H); comp.dirty = false; } return; }
   const fw = echo.fw, fh = echo.fh, { s, ox, oy } = frameRect(W, H, fw, fh), dw = fw * s, dh = fh * s;
   for (const t of [comp.tmp, comp.tmp2]) if (t.width !== fw || t.height !== fh) { t.width = fw; t.height = fh; }
   const t = comp.tmp.getContext("2d");
   t.globalCompositeOperation = "copy"; t.filter = "none";
-  if (em === "composite") {
+  if (em === "composite" || em === "overlay") {
     t.drawImage($("#cam"), 0, 0, fw, fh);                       // live webcam ...
     t.globalCompositeOperation = "destination-in";               // ... with the mask as alpha (current mask, no delay)
     t.filter = modes.feather ? `blur(${Math.min(3, modes.feather) / Math.max(s, 0.1)}px)` : "none"; t.drawImage(echo.live, 0, 0); t.filter = "none";
@@ -1329,8 +1389,9 @@ function drawComp(now) {
   ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, W, H);
   const fv = em === "projection" && cal.flipV;
   ctx.setTransform(perf.mirror ? -1 : 1, 0, 0, fv ? -1 : 1, perf.mirror ? W : 0, fv ? H : 0);
+  ctx.globalAlpha = em === "overlay" ? OV_CLEAR_ALPHA : 1;
   ctx.imageSmoothingQuality = "low"; ctx.drawImage(comp.tmp, ox, oy, dw, dh);
-  ctx.setTransform(1, 0, 0, 1, 0, 0); comp.dirty = true;
+  ctx.globalAlpha = 1; ctx.setTransform(1, 0, 0, 1, 0, 0); comp.dirty = true;
 }
 // ---- projection calibration: 4-corner homography (applied as a CSS matrix3d on the silhouette
 // canvas, so it costs nothing per frame), flips, fine offset/scale, and a grid + crosshair test pattern.
@@ -1418,6 +1479,13 @@ function wireModes() {
   $("#modeBtn").addEventListener("click", () => setMode(modes.mode === "off" ? modes.amb : "off"));   // on/off for the chosen ambience
   document.querySelectorAll("#ambSwitch .segb").forEach(b => b.addEventListener("click", () => setMode(b.dataset.amb)));   // instant: no camera restart
   $("#projBtn").addEventListener("click", () => setMode(modes.mode === "projection" ? "off" : "projection"));
+  const stage = $("#stage");
+  const setOv = () => { lum.at = 0; $("#vOv").textContent = Math.round(modes.strength * 100) + "%"; };   // ovLook applies it next frame
+  $("#ovStrength").value = Math.round(modes.strength * 100); setOv();
+  $("#ovStrength").addEventListener("input", e => { modes.strength = +e.target.value / 100; setOv(); saveModes(); });
+  $("#ovClear").checked = modes.keepClear; $("#ovLight").checked = !modes.keepClear;
+  for (const id of ["ovLight", "ovClear"]) $("#" + id).addEventListener("change", () => { modes.keepClear = $("#ovClear").checked; saveModes(); });
+  $("#camPromptBtn").addEventListener("click", () => { if (!perf.on) performOn(); });
   const bind = (id, key, out) => { const el = $("#" + id); el.value = modes[key]; if (out) $("#" + out).textContent = modes[key] + " px";
     el.addEventListener("input", () => { modes[key] = +el.value; if (out) $("#" + out).textContent = el.value + " px"; saveModes(); }); };
   bind("mGrow", "grow", "vGrow"); bind("mFeather", "feather", "vFeather");
