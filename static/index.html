@@ -1544,10 +1544,15 @@ function handTick(now, dt) {
 // no randomness. Ordinary visitors get the Reel visuals without camera/mic; the camera and lyrics
 // start only for ?preset=reel or an explicit click on the Reel chip / preset.
 const ROOM_STYLE = 6;
-const LOOKS = { reel: { echo: "neon", lyrics: "hand", hud: true, room: true }, classic: { echo: "ghost", lyrics: "kinetic", hud: false, room: false } };
+const LOOKS = { reel: { echo: "neon", room: true }, classic: { echo: "ghost", room: false } };   // lyric style is its own setting
 const look = { preset: "reel", echo: "neon", lyrics: "hand", hud: true, room: true, follow: true, side: "auto", lightOn: false };
-try { const sv = JSON.parse(localStorage.getItem("afterglow.look") || "null"); if (sv && LOOKS[sv.preset]) Object.assign(look, sv); } catch {}
-function saveLook() { try { localStorage.setItem("afterglow.look", JSON.stringify(look)); } catch {} }
+// Handwritten lyrics are the default in every scene; Kinetic is an option. Saved separately from the preset
+// (older saves had the preset decide it, so only a v2 save is trusted for lyrics/HUD).
+try {
+  const sv = JSON.parse(localStorage.getItem("afterglow.look") || "null");
+  if (sv && LOOKS[sv.preset]) { const { lyrics, hud, ...rest } = sv; Object.assign(look, rest); if (sv.v === 2) Object.assign(look, { lyrics, hud }); }
+} catch {}
+function saveLook() { try { localStorage.setItem("afterglow.look", JSON.stringify({ ...look, v: 2 })); } catch {} }
 function lookChanged() {
   $("#ghost").classList.toggle("neon", look.echo === "neon");
   $("#stage").classList.toggle("room", look.room); $("#stage").classList.toggle("hud-on", look.hud);
@@ -1560,6 +1565,7 @@ function lookChanged() {
   $("#lookBtn").textContent = reel ? "Reel" : "Classic";
   $("#lookBtn").setAttribute("aria-label", reel ? "Look: Reel. Switch to Classic" : "Look: Classic. Switch to Reel");
   $("#roomSel").value = look.room ? "1" : "0"; $("#echoSel").value = look.echo;
+  $("#effectSel").closest("label").style.display = look.lyrics === "kinetic" ? "" : "none";   // scene-matched effects are Kinetic-only
   $("#lyricSel").value = look.lyrics; $("#optFollow").checked = look.follow; $("#optHud").checked = look.hud; $("#optLight").checked = look.lightOn;
   saveLook();
 }
