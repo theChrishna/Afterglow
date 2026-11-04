@@ -1516,8 +1516,9 @@ function wireModes() {
 //     nothing. A motion measure (XOR of the last two snapshots) fades the whole trail in and out.
 //   Full pose history: the whole outline of each old snapshot.
 // The row sits on the side the subject is moving away from (or the freer side when still).
-const NEON_N = 7, NEON_STEP_MS = 110, NEON_GAP = 0.2, NEON_STEP_X = 0.07;
+const NEON_N = 7, NEON_STEP_MS = 110, NEON_GAP = 0.05, NEON_STEP_X = 0.07;
 const NEON_OFFS = [[1, 0], [-1, 0], [0, 1], [0, -1], [.7, .7], [-.7, .7], [.7, -.7], [-.7, -.7]];
+const NEON_GROW_F = [[0, 0], [3, 0], [-3, 0], [0, 3], [0, -3]];        // full-res: the live body (grown) is cut out of the trail
 const NEON_GROW = [[0, 0], [1.5, 0], [-1.5, 0], [0, 1.5], [0, -1.5]];   // half-res px: hides segmentation jitter on a still body
 const neon = { w: 0, h: 0, ring: [], head: -1, lastCap: 0, dir: 1, gain: 0, cells: 0 };
 function neonEnsure(w, h) {
@@ -1525,7 +1526,7 @@ function neonEnsure(w, h) {
   const hw = Math.max(1, w >> 1), hh = Math.max(1, h >> 1);
   Object.assign(neon, { w, h, hw, hh, head: -1, gain: 0, cells: 0,
     mh: canvas2(hw, hh), wk: canvas2(hw, hh), er: canvas2(hw, hh), ol: canvas2(hw, hh),       // half-res work canvases (motion)
-    fm: canvas2(w, h), fe: canvas2(w, h), fo: canvas2(w, h), tiny: canvas2(32, 18),           // full-res outline work (Full) + motion probe
+    fm: canvas2(w, h), fe: canvas2(w, h), fo: canvas2(w, h), tiny: canvas2(32, 18), acc: canvas2(w, h),           // full-res outline work (Full) + motion probe
     ring: Array.from({ length: NEON_N }, () => ({ mk: canvas2(hw, hh), c: canvas2(w, h), box: null, t: 0 })) });
   neon.fHalf = neon.fFull = "none";                  // smoothing filters, only if this browser really applies them
   try {
@@ -1587,46 +1588,65 @@ function drawNeon(ctx, now, dt, s, ox, oy) {
   // trail gain follows how much moved: quick to appear, slower to dissolve when the subject stops
   const want = motion ? Math.min(1, Math.max(0, (neon.cells - 1) / 5)) : 1;
   neon.gain += (want - neon.gain) * (1 - Math.exp(-dt / (want > neon.gain ? 0.08 : 0.45)));
-  // side: behind the direction of motion, but only where the row fits on screen; otherwise the freer side
-  const gap = Math.max(6, bw * NEON_GAP), step = Math.max(4, bw * NEON_STEP_X);
-  const room = d => d > 0 ? fw - x2 : x1, need = gap + (NEON_N - 2) * step + bw * 0.5;
+  // side: behind the direction of motion if there's room on screen, otherwise the freer side
+  const n = NEON_N - 1, room = d => d > 0 ? fw - x2 : x1;
   const old = neon.ring[(neon.head - 3 + R * 2) % R], cx = (x1 + x2) / 2;
   let pref = neon.dir, moving = false;
   if (old && old.box && old.t && now - old.t < NEON_STEP_MS * 6) {
     const mv = cx - (old.box[0] + old.box[2]) / 2;
     if (Math.abs(mv) > 0.06 * bw) { pref = mv > 0 ? -1 : 1; moving = true; }
   }
-  if (room(pref) < need * 0.5 && room(-pref) > room(pref)) pref = -pref;               // no room there: other side
-  else if (!moving && room(-pref) > Math.max(room(pref) * 1.4, need * 0.5)) pref = -pref;   // still: freer side, with hysteresis
-  neon.dir = pref;
-  const dir = neon.dir;
-  ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = "high";
-  ctx.globalCompositeOperation = "lighter";
+  const fitNeed = bw * 0.9;                                  // enough room to show a few copies
+  if (room(pref) < fitNeed && room(-pref) > room(pref)) pref = -pref;
+  else if (!moving && room(-pref) > Math.max(room(pref) * 1.4, fitNeed)) pref = -pref;
+  const dir = neon.dir = pref;
+  // Spacing: tight behind the subject, and squeezed so the whole row stays inside the frame. Copies may
+  // tuck in behind the body; whatever overlaps the live (grown) silhouette is cut away below, so nothing
+  // is ever drawn on the performer.
+  let gap = bw * NEON_GAP, step = Math.max(3, bw * NEON_STEP_X);
+  const avail = room(dir) - 4;
+  if (gap + (n - 1) * step + bw > avail) {
+    gap = Math.max(-bw * 0.6, avail - (n - 1) * step - bw);
+    if (gap <= -bw * 0.6) step = Math.max(2, (avail + bw * 0.6 - bw) / (n - 1));
+  }
+  const acc = neon.acc.getContext("2d");
+  acc.setTransform(1, 0, 0, 1, 0, 0); acc.globalCompositeOperation = "source-over"; acc.clearRect(0, 0, neon.w, neon.h);
+  acc.imageSmoothingEnabled = true; acc.imageSmoothingQuality = "high";
+  acc.globalCompositeOperation = "lighter";
   let floorY = 0, minX = Infinity, maxX = -Infinity, drawn = 0;
-  const wk = neon.wk.getContext("2d"), ol = neon.ol.getContext("2d");
-  for (let k = NEON_N - 1; k >= 1; k--) {            // oldest first; k = 1 is the newest copy, nearest the subject
+  const wk = neon.wk.getContext("2d");
+  for (let k = n; k >= 1; k--) {                      // oldest first; k = 1 is the newest copy, nearest the subject
     const r = neon.ring[(neon.head - k + R * 2) % R], age = now - r.t;
     if (!r.t || !r.box || age > NEON_STEP_MS * (NEON_N + 2)) continue;
     const alpha = 0.9 * Math.max(0, 1 - age / (NEON_STEP_MS * (NEON_N + 0.5))) * neon.gain;     // dimmer with age, scaled by motion
     if (alpha <= 0.02) continue;
     const [bx1, by1, bx2, by2] = r.box, cw = bx2 - bx1, ch = by2 - by1;
     const target = dir > 0 ? x2 + gap + (k - 1) * step : x1 - gap - (k - 1) * step - cw;     // copy's left edge, in mask px
-    const dx = ox + target * s, dy = oy + by1 * s;
     if (motion) {                                       // old mask minus the current (grown) mask, then outline it
       wk.globalCompositeOperation = "copy"; wk.drawImage(r.mk, 0, 0);
       wk.globalCompositeOperation = "destination-out";
       for (const [gx, gy] of NEON_GROW) wk.drawImage(neon.mh, gx, gy);
       outlineOf(neon.wk, neon.er, neon.ol, NEON_OFFS);
-      neonPaint(ctx, neon.ol, bx1 / 2, by1 / 2, cw / 2, ch / 2, dx, dy, cw * s, ch * s, alpha, k <= 2);
+      neonPaint(acc, neon.ol, bx1 / 2, by1 / 2, cw / 2, ch / 2, target, by1, cw, ch, alpha, false);
     } else {
-      neonPaint(ctx, r.c, bx1, by1, cw, ch, dx, dy, cw * s, ch * s, alpha, k <= 2);
+      neonPaint(acc, r.c, bx1, by1, cw, ch, target, by1, cw, ch, alpha, false);
     }
     drawn++; floorY = Math.max(floorY, by2); minX = Math.min(minX, target); maxX = Math.max(maxX, target + cw);
   }
   if (drawn && maxX > minX) {                            // thin floor baseline under the row, fading with the trail
-    const y = oy + Math.min(floorY, echo.fh - 2) * s;
-    ctx.globalAlpha = 0.7 * neon.gain; ctx.strokeStyle = "#ff3d9a"; ctx.lineWidth = 2; ctx.shadowColor = "rgba(255,61,154,.9)"; ctx.shadowBlur = 8;
-    ctx.beginPath(); ctx.moveTo(ox + minX * s, y); ctx.lineTo(ox + maxX * s, y); ctx.stroke();
+    const y = Math.min(floorY, echo.fh - 2);
+    acc.globalAlpha = 0.7 * neon.gain; acc.strokeStyle = "#ff3d9a"; acc.lineWidth = 1;
+    acc.beginPath(); acc.moveTo(minX, y); acc.lineTo(maxX, y); acc.stroke();
+  }
+  // cut away anything over the live body (grown a little), so the trail sits behind the performer
+  acc.globalCompositeOperation = "destination-out"; acc.globalAlpha = 1;
+  for (const [gx, gy] of NEON_GROW_F) acc.drawImage(echo.live, gx, gy);
+  acc.globalCompositeOperation = "source-over";
+  if (drawn) {
+    ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = "high";
+    ctx.globalCompositeOperation = "lighter"; ctx.globalAlpha = 1;
+    ctx.shadowColor = "rgba(255,61,154,.9)"; ctx.shadowBlur = 12;        // one glow pass for the whole row
+    ctx.drawImage(neon.acc, ox, oy, neon.w * s, neon.h * s);
   }
   ctx.globalCompositeOperation = "source-over"; ctx.globalAlpha = 1; ctx.shadowBlur = 0;
   echo.neonMs = echo.neonMs ? echo.neonMs * 0.9 + (performance.now() - t0) * 0.1 : performance.now() - t0;
