@@ -20,8 +20,9 @@ replacing the mood.
 
 ## Run of show
 
-1. Open the stage URL a few minutes early (the free Render instance sleeps when idle) and click
-   **Enter the stage**; allow the mic.
+1. Open the stage URL a few minutes early (the free Render instance sleeps when idle). For the
+   recorded look use `https://afterglow-chia.onrender.com/?preset=reel` (Reel look: Violet room,
+   Neon contour, handwritten lyrics). Click **Enter the stage** and allow the camera and mic.
 2. Say cue 1. Point out: the caption appears while you speak, the light reacts at once, the
    refined scene lands a few seconds later, and a freshly generated backdrop crossfades in after
    ~12 s.
@@ -29,18 +30,28 @@ replacing the mood.
 4. Cue 7 (relative change), then cue 8.
 5. Press **H** to hide the controls for a clean final look.
 
+No mic? Tap the mood chips (Rain, Neon, Forest, Space, Fire, Ocean). Or press **Watch the demo**,
+which plays cues 1–8 here, 11 s apart, with a caption (Stop or Esc ends it).
+
+## Looks
+
+- **Reel** (default; the **Reel look** chip, the Reel/Classic button, or `?preset=reel`): Violet room,
+  Neon contour pose-history row, handwritten lyrics above your head. Deterministic, so takes are
+  reproducible. Backdrops are hidden and not generated.
+- **Classic**: moods with Muse Image backdrops, ghost echo, kinetic lyrics.
+
 ## Performance modes (camera)
 
 - **M** cycles Off → Composite → Projection. Composite puts the performer, cut out, onto the stage.
   Projection blacks out the performer's silhouette so a projector doesn't light them.
 - In Projection, press **C** to calibrate: drag the 4 corners onto the stage, then adjust offset and scale.
-- **F** mirror, **T** latency readout.
+- **F** mirror, **T** latency readout, **L** lyrics, **P** camera, **H** hide controls, **Esc** stop the demo.
 
 ## If something goes wrong
 
-- **Mic fails or the room is noisy:** type the cue in the box and press Enter. Same pipeline,
+- **Mic fails or the room is noisy:** tap a mood chip, or type the cue under **More** and press Enter. Same pipeline,
   minus speech recognition.
-- **Status pill says "hiccup":** the last scene stays up; just give the next cue.
+- **Status pill says "Something slipped":** the last scene stays up; just give the next cue.
 - **Network is down:** run locally with `MOCK=1` (canned transcripts and keyword scenes, no API
   calls), or play the fallback recording.
-- **"Slow down":** the per-IP limit is 6 quick cues, then one every 10 s.
+- **"Give it a few seconds":** the per-IP limit is 6 quick cues, then one every 10 s.

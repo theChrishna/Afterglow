@@ -1,8 +1,9 @@
 # Afterglow
 
-A live-performance stage engine. The performer speaks cues (push-to-talk) and the stage reacts:
-light and motion change at once, a new backdrop drifts in a few seconds later, and with the camera
-on, the performer's silhouette echoes on the stage. Lyrics they say or sing stream onto the screen.
+A live-performance stage engine. Say a mood and the stage becomes it: the performer speaks cues
+(push-to-talk) or taps a mood chip, light and motion change at once, and the refined scene lands a
+few seconds later. With the camera on, the performer's silhouette echoes on the stage, and what
+they say or sing appears as lyrics.
 
 Live: https://afterglow-chia.onrender.com (Render free plan; the first load after idle is slow)
 
@@ -17,7 +18,36 @@ cp .env.example .env            # put MODEL_API_KEY in .env (never commit it)
 ```
 
 `MOCK=1 .venv/bin/uvicorn app.main:app --port 8000` runs with canned transcripts and keyword
-scenes, no API calls and no key needed. Tests: `.venv/bin/pytest`.
+scenes, no API calls and no key needed. Tests: `.venv/bin/python -m pytest`.
+
+## First run
+
+- **Enter the stage**, then hold **Space** or the mic button and say a mood. The mic is only
+  requested the first time you use it. The camera only starts when you press the camera button,
+  choose a Mode, or click Reel look.
+- No mic? Tap a **mood chip** (Rain, Neon, Forest, Space, Fire, Ocean). Chips use the same scene
+  pipeline as a spoken cue. **Watch the demo** plays the DEMO.md cues 11 s apart with a caption;
+  Stop or Esc ends it.
+- Advanced controls (camera mode, calibration, looks, lyric style, stage info, latency readout,
+  typed cue) live under **More**.
+
+## Looks (presets)
+
+| Preset | Background | Echo | Lyrics |
+|---|---|---|---|
+| **Reel** (default) | *Violet room*: lit wall gradient, brighter ceiling band, pink floor strip, slow breathing. Cues tint it. | *Neon contour*: a row of 6 outline copies beside the performer, each from k×130 ms ago (pink outer, orange/yellow inner, additive glow, older copies dimmer, floor line). The current outline has no added delay. | *Handwritten*: up to 2 lines, revealed letter by letter, one line above the performer's head with an eased follow. Each phrase uses the next font in a fixed order (Caveat, Gaegu, Shadows Into Light, Reenie Beanie, Fraunces). Optional HUD details: cursor box, x/y readout, hairline leader lines. |
+| **Classic** | Moods with Muse Image backdrops | Ghost (difference-blend silhouette, trail, delayed copies) | Kinetic type, 6 effects |
+
+- Switch with the **Reel/Classic** button, the **Reel look** chip, or under More. The choice is
+  saved in this browser.
+- `?preset=reel` (e.g. `https://afterglow-chia.onrender.com/?preset=reel`) applies the Reel look
+  and, after Enter, also starts the camera and lyrics. So does clicking Reel look. Ordinary first
+  visits show the Reel visuals but start nothing.
+- The look is deterministic (fixed font order, no randomness), so recordings are reproducible.
+- While the Violet room is on, cues are sent with `no_backdrop`, so the server skips Muse Image
+  generation (the backdrop is hidden anyway). This saves credits and keeps the demo button cheap.
+- Inspired by reference frames of a projected neon-contour performance. No artwork or text from
+  them is used.
 
 See [DEMO.md](DEMO.md) for the cue script.
 
@@ -36,21 +66,25 @@ Meta's SAM 3.1.
 
 ## Performance modes
 
-Switch with the **Mode** button next to Perform, or press **M** (Off → Composite → Projection).
-Choosing a mode turns the camera on.
+Switch with the **Mode** button, or press **M** (Off → Composite → Projection). Choosing a mode
+turns the camera on. The echo style (Neon contour or Ghost) comes from the current look.
 
 | Mode | What the audience sees |
 |---|---|
 | **Off** (default) | The original ghost echo: glowing live silhouette, a rising trail and delayed copies, plus SAM 3.1 snapshots. |
 | **Composite** | The live webcam with the background removed (mask as alpha, 2–3 px feather) over the backdrop and shader, under the lyrics. Echo trail optional (off by default, drawn at half strength). |
-| **Projection** | For a projector pointed at the performer: scenery everywhere except a live **black** silhouette over the performer, so no light lands on them. **Grow** (0–30 px) widens the black area; **feather** softens its edge. No echo or glow in this mode. |
+| **Projection** | For a projector pointed at the performer: scenery everywhere except a live **black** silhouette over the performer, so no light lands on them. **Grow** (0–30 px) widens the black area; **feather** softens its edge. No echo or glow, unless **Light on performer** is ticked (More): then there's no black silhouette and the neon outlines land on the body. |
 
 **Calibration** (Projection mode, press **C**): drag the 4 corner handles until the grid and
 crosshairs line up with the stage (a homography), then fine-tune offset X/Y and scale, and set
 mirror or flip up/down. The warp is a CSS `matrix3d` on the silhouette layer, so it adds no
 per-frame cost. Settings are saved in this browser's localStorage.
 
-Other keys: **F** mirror, **T** latency readout, **P** camera on/off, **L** lyrics, **H** hide controls.
+## Shortcuts
+
+Everything has an on-screen control; keys are optional. **Space** hold to speak · **L** lyrics ·
+**P** camera · **M** mode · **C** calibrate · **F** mirror · **E** kinetic lyric effect ·
+**T** latency readout · **H** hide controls · **Esc** stop demo / close panels.
 
 ## Latency
 
@@ -67,6 +101,7 @@ Measured with the on-screen readout (**T**) in the Chromium-based in-app browser
 | Per-frame allocations in the mask path | 1 canvas per frame | none (fixed 40-slot ring) |
 | Camera request | 640×360 | 640×360, 60 fps ideal (24 min) |
 | Draw loop in Projection (grow 8, feather 3) | n/a | 16.7 ms (holds 60 Hz) |
+| Draw loop with Neon contour (Reel look) | n/a | 16.7 ms (holds 60 Hz); neon drawing ~0.4–0.5 ms on the main thread |
 
 What changed: segmentation is driven by `requestVideoFrameCallback` (falls back to
 `requestAnimationFrame`); MediaPipe runs on its GPU delegate with its own WebGL canvas, and its mask
@@ -83,5 +118,9 @@ timings. Inference stays on the main thread; moving it to a worker was not attem
 - A real webcam (all numbers above use a synthetic canvas camera).
 - A real projector: Projection mode and calibration were checked on screen only.
 - Phones and tablets: layout checked at 375 px wide in a desktop browser, not on a device.
+- Singing or speech accuracy of the handwritten lyrics: tested by feeding words to the page,
+  not with a live voice (no mic in the test browser).
+- Head-following and the pose-history row were checked with a synthetic subject (a photo panning
+  over a plain wall), not a moving person.
 - Safari and Firefox: `requestVideoFrameCallback`, canvas `filter` (feather) and the GPU mask
   path may behave differently; the fallbacks are in place but were not exercised there.
