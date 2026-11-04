@@ -23,6 +23,13 @@
   #fx { position: absolute; inset: 0; width: 100%; height: 100%; mix-blend-mode: screen; }
   #comp { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
   #modePanel { display: none; position: absolute; left: 12px; top: 60px; z-index: 8; padding: 8px 10px; border-radius: 8px; background: rgba(0,0,0,.6); color: #eee; font: 12px/1.6 system-ui, sans-serif; }
+  #calib { display: none; position: absolute; inset: 0; z-index: 10; }
+  #calib.on { display: block; }
+  #calPat { position: absolute; left: 0; top: 0; transform-origin: 0 0; pointer-events: none; }
+  #comp { transform-origin: 0 0; }
+  #calib .h { position: absolute; width: 28px; height: 28px; margin: -14px 0 0 -14px; border: 2px solid #ff0; border-radius: 50%; background: rgba(255,255,0,.25); cursor: grab; touch-action: none; }
+  #calCtl { position: absolute; left: 50%; top: 50%; translate: -50% -50%; padding: 12px 14px; border-radius: 10px; background: rgba(0,0,0,.75); color: #eee; font: 12px/1.7 system-ui, sans-serif; max-width: min(340px, calc(100vw - 32px)); }
+  #calCtl label { display: block; } #calCtl input[type=range] { width: 140px; vertical-align: middle; }
   #modePanel.on { display: block; } #modePanel label { display: block; } #modePanel input[type=range] { width: 110px; vertical-align: middle; }
   #ghost { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
   #tint { position: absolute; inset: 0; mix-blend-mode: soft-light; opacity: 0; transition: opacity 1.6s ease, background-color 1.6s ease; }
@@ -140,6 +147,21 @@
     <label><input type="checkbox" id="mTrail"> echo trail</label>
     <label data-for="projection">grow <input type="range" id="mGrow" min="0" max="30" value="8"> <span id="vGrow"></span></label>
     <label>feather <input type="range" id="mFeather" min="0" max="12" value="3"> <span id="vFeather"></span></label>
+    <label data-for="projection"><button id="calBtn" type="button">Calibrate (C)</button></label>
+  </div>
+  <div id="calib" aria-label="Projection calibration">
+    <canvas id="calPat"></canvas>
+    <div class="h" data-i="0"></div><div class="h" data-i="1"></div><div class="h" data-i="2"></div><div class="h" data-i="3"></div>
+    <div id="calCtl">
+      <b>Calibrate projection</b><br>
+      Drag the 4 corners until the grid lines up with the stage, then fine-tune.<br>
+      <label><input type="checkbox" id="cMirror"> mirror (flip left/right)</label>
+      <label><input type="checkbox" id="cFlipV"> flip up/down</label>
+      <label>offset X <input type="range" id="cX" min="-300" max="300" value="0"> <span></span></label>
+      <label>offset Y <input type="range" id="cY" min="-300" max="300" value="0"> <span></span></label>
+      <label>scale <input type="range" id="cS" min="50" max="150" value="100"> <span></span></label>
+      <button id="cReset" type="button">Reset</button> <button id="cDone" type="button">Done (C)</button>
+    </div>
   </div>
   <div id="lyrics" data-anchor="center" title="Drag to place · double-click to follow you"></div>
   <div id="tint"></div>
@@ -1048,9 +1070,11 @@ function setMode(m) {
   modes.mode = m;
   $("#modeBtn").textContent = "Mode: " + MODE_NAMES[m]; $("#modeBtn").setAttribute("aria-pressed", m === "off" ? "false" : "true");
   $("#modePanel").classList.toggle("on", m !== "off");
-  $("#modePanel [data-for=projection]").style.display = m === "projection" ? "" : "none";
+  document.querySelectorAll("#modePanel [data-for=projection]").forEach(el => el.style.display = m === "projection" ? "" : "none");
+  if (m !== "projection" && cal.open) calOpen(false);
   if (m === "off") $("#comp").getContext("2d").clearRect(0, 0, $("#comp").width, $("#comp").height);
   if (m !== "off" && !perf.on) performOn();
+  if (typeof cal !== "undefined") calApply();
 }
 function cycleMode() { setMode({ off: "composite", composite: "projection", projection: "off" }[modes.mode]); }
 const comp = { tmp: canvas2(2, 2), tmp2: canvas2(2, 2) };
@@ -1064,7 +1088,7 @@ function drawComp(now) {
   if (modes.mode === "composite") {
     t.drawImage($("#cam"), 0, 0, fw, fh);                       // live webcam ...
     t.globalCompositeOperation = "destination-in";               // ... with the mask as alpha (current mask, no delay)
-    t.filter = modes.feather ? `blur(${Math.min(3, modes.feather)}px)` : "none"; t.drawImage(echo.live, 0, 0); t.filter = "none";
+    t.filter = modes.feather ? `blur(${Math.min(3, modes.feather) / Math.max(s, 0.1)}px)` : "none"; t.drawImage(echo.live, 0, 0); t.filter = "none";
   } else {
     const g = modes.grow, t2 = comp.tmp2.getContext("2d");       // grow: dilate by stamping the mask around a circle
     t2.globalCompositeOperation = "copy"; t2.drawImage(echo.live, 0, 0);
@@ -1077,9 +1101,92 @@ function drawComp(now) {
   }
   t.globalCompositeOperation = "source-over";
   ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, W, H);
-  if (perf.mirror) ctx.setTransform(-1, 0, 0, 1, W, 0);
+  const fv = modes.mode === "projection" && cal.flipV;
+  ctx.setTransform(perf.mirror ? -1 : 1, 0, 0, fv ? -1 : 1, perf.mirror ? W : 0, fv ? H : 0);
   ctx.imageSmoothingQuality = "low"; ctx.drawImage(comp.tmp, ox, oy, dw, dh);
   ctx.setTransform(1, 0, 0, 1, 0, 0); comp.dirty = true;
+}
+// ---- projection calibration: 4-corner homography (applied as a CSS matrix3d on the silhouette
+// canvas, so it costs nothing per frame), flips, fine offset/scale, and a grid + crosshair test pattern.
+const CAL_DEFAULT = { c: [[0, 0], [1, 0], [1, 1], [0, 1]], dx: 0, dy: 0, sc: 1, flipV: false };
+const cal = Object.assign(JSON.parse(JSON.stringify(CAL_DEFAULT)), { open: false });
+try { const sv = JSON.parse(localStorage.getItem("afterglow.calib") || "null"); if (sv && Array.isArray(sv.c) && sv.c.length === 4) Object.assign(cal, sv, { open: false }); } catch {}
+function calSave() { try { localStorage.setItem("afterglow.calib", JSON.stringify({ c: cal.c, dx: cal.dx, dy: cal.dy, sc: cal.sc, flipV: cal.flipV })); } catch {} }
+function homography(src, dst) {     // 3x3 H (h33 = 1) mapping 4 src points to 4 dst points
+  const A = [], b = [];
+  for (let i = 0; i < 4; i++) {
+    const [x, y] = src[i], [u, v] = dst[i];
+    A.push([x, y, 1, 0, 0, 0, -u * x, -u * y]); b.push(u);
+    A.push([0, 0, 0, x, y, 1, -v * x, -v * y]); b.push(v);
+  }
+  for (let c = 0; c < 8; c++) {     // Gaussian elimination with partial pivoting
+    let p = c; for (let r = c + 1; r < 8; r++) if (Math.abs(A[r][c]) > Math.abs(A[p][c])) p = r;
+    [A[c], A[p]] = [A[p], A[c]]; [b[c], b[p]] = [b[p], b[c]];
+    if (Math.abs(A[c][c]) < 1e-12) return null;
+    for (let r = 0; r < 8; r++) if (r !== c) { const f = A[r][c] / A[c][c]; for (let k = c; k < 8; k++) A[r][k] -= f * A[c][k]; b[r] -= f * b[c]; }
+  }
+  return b.map((v, i) => v / A[i][i]);
+}
+function calCorners() {             // final screen-space corners: raw corners, scaled about the centre, then offset
+  const W = innerWidth, H = innerHeight;
+  return cal.c.map(([x, y]) => [(x * W - W / 2) * cal.sc + W / 2 + cal.dx, (y * H - H / 2) * cal.sc + H / 2 + cal.dy]);
+}
+function calApply() {
+  const W = innerWidth, H = innerHeight, dst = calCorners();
+  const h = homography([[0, 0], [W, 0], [W, H], [0, H]], dst);
+  const css = h ? `matrix3d(${h[0]},${h[3]},0,${h[6]},${h[1]},${h[4]},0,${h[7]},0,0,1,0,${h[2]},${h[5]},0,1)` : "none";
+  const identity = cal.sc === 1 && !cal.dx && !cal.dy && cal.c.every((p, i) => p[0] === CAL_DEFAULT.c[i][0] && p[1] === CAL_DEFAULT.c[i][1]);
+  // The warp belongs to the projector, so it applies only in Projection mode.
+  $("#comp").style.transform = modes.mode === "projection" && !identity ? css : "";
+  $("#comp").style.width = $("#calPat").style.width = W + "px"; $("#comp").style.height = $("#calPat").style.height = H + "px";
+  $("#calPat").style.transform = css;
+  document.querySelectorAll("#calib .h").forEach((el, i) => { el.style.left = dst[i][0] + "px"; el.style.top = dst[i][1] + "px"; });
+  for (const [id, v, f] of [["cX", cal.dx, "px"], ["cY", cal.dy, "px"], ["cS", Math.round(cal.sc * 100), "%"]]) {
+    $("#" + id).value = v; $("#" + id).nextElementSibling.textContent = v + f;
+  }
+  $("#cFlipV").checked = cal.flipV; $("#cMirror").checked = perf.mirror;
+}
+function calPattern() {
+  const c = $("#calPat"), W = innerWidth, H = innerHeight;
+  c.width = W; c.height = H;
+  const x = c.getContext("2d");
+  x.fillStyle = "rgba(0,0,0,.35)"; x.fillRect(0, 0, W, H);
+  x.strokeStyle = "rgba(255,255,255,.7)"; x.lineWidth = 1;
+  for (let i = 0; i <= 10; i++) { const gx = Math.round(i * W / 10) + .5, gy = Math.round(i * H / 10) + .5;
+    x.beginPath(); x.moveTo(gx, 0); x.lineTo(gx, H); x.moveTo(0, gy); x.lineTo(W, gy); x.stroke(); }
+  x.strokeStyle = "#ff0"; x.lineWidth = 3;
+  const cross = (cx, cy, r) => { x.beginPath(); x.moveTo(cx - r, cy); x.lineTo(cx + r, cy); x.moveTo(cx, cy - r); x.lineTo(cx, cy + r); x.stroke();
+    x.beginPath(); x.arc(cx, cy, r * 0.6, 0, Math.PI * 2); x.stroke(); };
+  cross(W / 2, H / 2, 40);
+  for (const [cx, cy] of [[60, 60], [W - 60, 60], [W - 60, H - 60], [60, H - 60]]) cross(cx, cy, 24);
+  x.strokeStyle = "#0ff"; x.lineWidth = 4; x.strokeRect(2, 2, W - 4, H - 4);
+  x.fillStyle = "#fff"; x.font = "bold 16px system-ui, sans-serif";
+  x.fillText("TOP LEFT", 90, 40); x.textAlign = "right"; x.fillText("TOP RIGHT", W - 90, 40);
+}
+function calOpen(on) {
+  cal.open = on; $("#calib").classList.toggle("on", on);
+  if (on) { if (modes.mode !== "projection") setMode("projection"); calPattern(); }
+  calApply();
+}
+function wireCalib() {
+  document.querySelectorAll("#calib .h").forEach(el => {
+    el.addEventListener("pointerdown", e => { e.preventDefault(); el.setPointerCapture(e.pointerId); el.dataset.drag = "1"; });
+    el.addEventListener("pointermove", e => {
+      if (!el.dataset.drag) return;
+      const W = innerWidth, H = innerHeight, i = +el.dataset.i;   // invert offset/scale back to a raw, normalised corner
+      cal.c[i] = [((e.clientX - cal.dx - W / 2) / cal.sc + W / 2) / W, ((e.clientY - cal.dy - H / 2) / cal.sc + H / 2) / H];
+      calApply();
+    });
+    for (const ev of ["pointerup", "pointercancel"]) el.addEventListener(ev, () => { delete el.dataset.drag; calSave(); });
+  });
+  for (const [id, set] of [["cX", v => cal.dx = v], ["cY", v => cal.dy = v], ["cS", v => cal.sc = v / 100]])
+    $("#" + id).addEventListener("input", e => { set(+e.target.value); calApply(); calSave(); });
+  $("#cFlipV").addEventListener("change", e => { cal.flipV = e.target.checked; calSave(); });
+  $("#cMirror").addEventListener("change", e => { perf.mirror = e.target.checked; $("#mMirror").checked = perf.mirror; saveModes(); });
+  $("#cReset").addEventListener("click", () => { Object.assign(cal, JSON.parse(JSON.stringify(CAL_DEFAULT))); calApply(); calSave(); });
+  $("#cDone").addEventListener("click", () => calOpen(false));
+  $("#calBtn").addEventListener("click", () => calOpen(!cal.open));
+  addEventListener("resize", () => { if (cal.open) calPattern(); calApply(); });
 }
 function wireModes() {
   $("#modeBtn").addEventListener("click", cycleMode);
@@ -1088,6 +1195,7 @@ function wireModes() {
   bind("mGrow", "grow", "vGrow"); bind("mFeather", "feather", "vFeather");
   $("#mMirror").checked = perf.mirror; $("#mMirror").addEventListener("change", e => { perf.mirror = e.target.checked; saveModes(); });
   $("#mTrail").checked = modes.trail; $("#mTrail").addEventListener("change", e => { modes.trail = e.target.checked; saveModes(); });
+  wireCalib();
   setMode("off");
 }
 
@@ -1107,6 +1215,7 @@ function wireInput() {
     else if (k === "p") perf.on ? performOff() : performOn();
     else if (k === "l") ly.on || ly.pending ? lyricsOff() : lyricsOn();
     else if (k === "m") cycleMode();
+    else if (k === "c") calOpen(!cal.open);
     else if (k === "f") { perf.mirror = !perf.mirror; $("#mMirror").checked = perf.mirror; saveModes(); }
     else if (k === "t") $("#lat").classList.toggle("on");
     else if (k === "e") {
