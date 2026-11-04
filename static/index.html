@@ -290,7 +290,7 @@
       <div class="row"><button class="btn" id="presetReel" type="button">Reel look</button><button class="btn" id="presetClassic" type="button">Classic</button></div>
       <label>Background <select id="roomSel" aria-label="Background"><option value="1">Violet room</option><option value="0">Moods and backdrops</option></select></label>
       <label>Echo <select id="echoSel" aria-label="Echo style"><option value="neon">Neon contour</option><option value="ghost">Ghost (classic)</option></select></label>
-      <label>Trail source <select id="trailSel" aria-label="Neon trail source"><option value="motion">Motion only</option><option value="full">Full pose history</option></select></label>
+      <label>Trail source <select id="trailSel" aria-label="Neon trail source"><option value="full">Full pose history</option><option value="motion">Motion only</option></select></label>
       <h3>Lyrics</h3>
       <label>Style <select id="lyricSel" aria-label="Lyric style"><option value="hand">Handwritten</option><option value="kinetic">Kinetic</option></select></label>
       <label><input type="checkbox" id="optFollow" checked> Follow subject</label>
@@ -1527,6 +1527,14 @@ function neonEnsure(w, h) {
     mh: canvas2(hw, hh), wk: canvas2(hw, hh), er: canvas2(hw, hh), ol: canvas2(hw, hh),       // half-res work canvases (motion)
     fm: canvas2(w, h), fe: canvas2(w, h), fo: canvas2(w, h), tiny: canvas2(32, 18),           // full-res outline work (Full) + motion probe
     ring: Array.from({ length: NEON_N }, () => ({ mk: canvas2(hw, hh), c: canvas2(w, h), box: null, t: 0 })) });
+  neon.fHalf = neon.fFull = "none";                  // smoothing filters, only if this browser really applies them
+  try {
+    const a = canvas2(40, 40), b = canvas2(40, 40), ag = a.getContext("2d"), bg = b.getContext("2d");
+    ag.fillStyle = "#fff"; ag.fillRect(8, 8, 24, 24);
+    bg.filter = "blur(2px) url(#neonThr)"; bg.drawImage(a, 0, 0); bg.filter = "none";
+    const px = bg.getImageData(20, 20, 1, 1).data[3], edge = bg.getImageData(2, 2, 1, 1).data[3];
+    if (px > 200 && edge < 20) { neon.fHalf = "blur(2.5px) url(#neonThr)"; neon.fFull = "blur(5px) url(#neonThr)"; }
+  } catch {}
   const sc = perf.scratch.getContext("2d");
   neon.grad = sc.createLinearGradient(0, 0, 0, h); neon.gradH = sc.createLinearGradient(0, 0, 0, hh);
   for (const g of [neon.grad, neon.gradH]) { g.addColorStop(0, "#ff8a3d"); g.addColorStop(1, "#ffd166"); }
@@ -1553,7 +1561,7 @@ function neonCapture(now, fb) {
   const r = neon.ring[neon.head];
   r.mk.getContext("2d").globalCompositeOperation = "copy"; r.mk.getContext("2d").drawImage(neon.mh, 0, 0);
   if (look.trail === "full") {                       // full outline of this snapshot (only needed for Full pose history)
-    const m = neon.fm.getContext("2d"); m.globalCompositeOperation = "copy"; m.filter = "blur(5px) url(#neonThr)"; m.drawImage(echo.live, 0, 0); m.filter = "none";
+    const m = neon.fm.getContext("2d"); m.globalCompositeOperation = "copy"; m.filter = neon.fFull; m.drawImage(echo.live, 0, 0); m.filter = "none";
     outlineOf(neon.fm, neon.fe, neon.fo, NEON_OFFS);
     r.c.getContext("2d").globalCompositeOperation = "copy"; r.c.getContext("2d").drawImage(neon.fo, 0, 0);
   }
@@ -1563,7 +1571,7 @@ function neonCapture(now, fb) {
     t.globalCompositeOperation = "copy"; t.drawImage(r.mk, 0, 0, 32, 18);
     t.globalCompositeOperation = "xor"; t.drawImage(prev.mk, 0, 0, 32, 18);
     const d = t.getImageData(0, 0, 32, 18).data; let n = 0;
-    for (let i = 3; i < d.length; i += 4) if (d[i] > 100) n++;
+    for (let i = 3; i < d.length; i += 4) if (d[i] > 30) n++;
     neon.cells = n;
   }
 }
@@ -1572,20 +1580,26 @@ function drawNeon(ctx, now, dt, s, ox, oy) {
   neonEnsure(echo.fw, echo.fh);
   const fb = echo.frameBox, motion = look.trail !== "full";
   const mhc = neon.mh.getContext("2d");               // smoothed mask: blur + re-threshold rounds off the curves
-  mhc.globalCompositeOperation = "copy"; mhc.filter = "blur(2.5px) url(#neonThr)"; mhc.drawImage(echo.live, 0, 0, neon.hw, neon.hh); mhc.filter = "none";
+  mhc.globalCompositeOperation = "copy"; mhc.filter = neon.fHalf; mhc.drawImage(echo.live, 0, 0, neon.hw, neon.hh); mhc.filter = "none";
   if (fb && now - neon.lastCap >= NEON_STEP_MS) neonCapture(now, fb);
   if (!fb) { echo.neonMs = echo.neonMs ? echo.neonMs * 0.9 + (performance.now() - t0) * 0.1 : performance.now() - t0; return; }
   const [x1, y1, x2, y2] = fb, bw = Math.max(8, x2 - x1), fw = echo.fw, R = neon.ring.length;
   // trail gain follows how much moved: quick to appear, slower to dissolve when the subject stops
-  const want = motion ? Math.min(1, Math.max(0, (neon.cells - 2) / 14)) : 1;
+  const want = motion ? Math.min(1, Math.max(0, (neon.cells - 1) / 5)) : 1;
   neon.gain += (want - neon.gain) * (1 - Math.exp(-dt / (want > neon.gain ? 0.08 : 0.45)));
-  // side: behind the direction of motion; the freer side when (nearly) still, with hysteresis
+  // side: behind the direction of motion, but only where the row fits on screen; otherwise the freer side
+  const gap = Math.max(6, bw * NEON_GAP), step = Math.max(4, bw * NEON_STEP_X);
+  const room = d => d > 0 ? fw - x2 : x1, need = gap + (NEON_N - 2) * step + bw * 0.5;
   const old = neon.ring[(neon.head - 3 + R * 2) % R], cx = (x1 + x2) / 2;
+  let pref = neon.dir, moving = false;
   if (old && old.box && old.t && now - old.t < NEON_STEP_MS * 6) {
     const mv = cx - (old.box[0] + old.box[2]) / 2;
-    if (Math.abs(mv) > 0.06 * bw) neon.dir = mv > 0 ? -1 : 1;
-  } else if (neon.dir > 0 && x1 > (fw - x2) * 1.4) neon.dir = -1; else if (neon.dir < 0 && (fw - x2) > x1 * 1.4) neon.dir = 1;
-  const gap = Math.max(6, bw * NEON_GAP), step = Math.max(4, bw * NEON_STEP_X), dir = neon.dir;
+    if (Math.abs(mv) > 0.06 * bw) { pref = mv > 0 ? -1 : 1; moving = true; }
+  }
+  if (room(pref) < need * 0.5 && room(-pref) > room(pref)) pref = -pref;               // no room there: other side
+  else if (!moving && room(-pref) > Math.max(room(pref) * 1.4, need * 0.5)) pref = -pref;   // still: freer side, with hysteresis
+  neon.dir = pref;
+  const dir = neon.dir;
   ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = "high";
   ctx.globalCompositeOperation = "lighter";
   let floorY = 0, minX = Infinity, maxX = -Infinity, drawn = 0;
@@ -1697,14 +1711,18 @@ function handTick(now, dt) {
 // start only for ?preset=reel or an explicit click on the Reel chip / preset.
 const ROOM_STYLE = 6;
 const LOOKS = { reel: { echo: "neon", room: true }, classic: { echo: "ghost", room: false } };   // lyric style is its own setting
-const look = { preset: "reel", echo: "neon", trail: "motion", lyrics: "hand", hud: true, room: true, follow: true, side: "auto", lightOn: false };
+const look = { preset: "reel", echo: "neon", trail: "full", lyrics: "hand", hud: true, room: true, follow: true, side: "auto", lightOn: false };
 // Handwritten lyrics are the default in every scene; Kinetic is an option. Saved separately from the preset
 // (older saves had the preset decide it, so only a v2 save is trusted for lyrics/HUD).
 try {
   const sv = JSON.parse(localStorage.getItem("afterglow.look") || "null");
-  if (sv && LOOKS[sv.preset]) { const { lyrics, hud, ...rest } = sv; Object.assign(look, rest); if (sv.v === 2) Object.assign(look, { lyrics, hud }); }
+  if (sv && LOOKS[sv.preset]) {
+    const { lyrics, hud, trail, ...rest } = sv; Object.assign(look, rest);
+    if (sv.v >= 2) Object.assign(look, { lyrics, hud });
+    if (sv.v >= 3 && (trail === "full" || trail === "motion")) look.trail = trail;   // v2 saved the old Motion-only default
+  }
 } catch {}
-function saveLook() { try { localStorage.setItem("afterglow.look", JSON.stringify({ ...look, v: 2 })); } catch {} }
+function saveLook() { try { localStorage.setItem("afterglow.look", JSON.stringify({ ...look, v: 3 })); } catch {} }
 function lookChanged() {
   $("#ghost").classList.toggle("neon", look.echo === "neon");
   $("#stage").classList.toggle("room", look.room); $("#stage").classList.toggle("hud-on", look.hud);
