@@ -542,7 +542,7 @@ function frame(now) {
   updateLatHud(now);
   ovApply(now); if (ovOn) drawCamLayer();
   drawComp(now);
-  drawGhosts(now, dt);
+  try { drawGhosts(now, dt); } catch (err) { echoFailed(err); }   // a trail bug must never stop the loop (and with it the mask)
   if (look.lyrics === "hand") handTick(now, dt); else placeLyrics(dt);
   requestAnimationFrame(frame);
 }
@@ -1158,6 +1158,10 @@ function trailSlots(now, n) {
   }
   return c;
 }
+function echoFailed(err) {                            // first failure: Neon falls back to the Ghost style; a second: no copies
+  if (!echo.trailFailed) { echo.trailFailed = true; console.error("Echo trail failed; falling back to the Ghost echo.", err); }
+  else if (!echo.trailOff) { echo.trailOff = true; console.error("Ghost echo failed too; echo copies are off. The mask is unaffected.", err); }
+}
 function ringMeta() {                                 // centre/width of the subject in the newest ring slot (Distance spacing)
   const r = echo.ring[echo.head], b = echo.frameBox;
   if (b) { r.cx = (b[0] + b[2]) / 2; r.cy = (b[1] + b[3]) / 2; r.bw = b[2] - b[0]; } else r.bw = 0;
@@ -1276,6 +1280,7 @@ function frameRect(W, H, fw, fh) {     // frame → screen: fit width; on portra
 function drawGhosts(now, dt) {
   const canvas = $("#ghost"), ctx = canvas.getContext("2d"), W = canvas.width, H = canvas.height;
   ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.globalCompositeOperation = "source-over"; ctx.globalAlpha = 1; ctx.shadowBlur = 0;   // clean state even after a caught failure
   ctx.clearRect(0, 0, W, H);
   if (perf.mirror) ctx.setTransform(-1, 0, 0, 1, W, 0);
   const ncv = $("#trail"), nctx = ncv.getContext("2d");     // neon trail layer (named so it can't clash with the ghost trail's `tctx` below)
@@ -1297,7 +1302,8 @@ function drawGhosts(now, dt) {
   // 2) Real-time echo: shared-placement copies (Ghost or Neon), body cut out; Off adds Ghost's heat trail + live glow.
   if (echo.live && perf.on && now - echo.lastSegAt < 1000) {
     const { s, ox, oy } = frameRect(W, H, echo.fw, echo.fh), dw = echo.fw * s, dh = echo.fh * s;
-    const ghostOn = look.echo === "ghost", off = md === "off", light = md === "composite" ? 0.5 : 1;
+    const style = echo.trailOff ? "none" : look.echo === "neon" && echo.trailFailed ? "ghost" : look.echo;   // Neon failed: Ghost style
+    const ghostOn = style === "ghost", off = md === "off", light = md === "composite" ? 0.5 : 1;
     if (ghostOn && off) {                                // Off only: the drifting heat trail (not a past position, so not in the ambiences)
       const tctx = echo.trail.getContext("2d");
       tctx.globalCompositeOperation = "copy";            // let the trail drift upward like heat
@@ -1312,7 +1318,7 @@ function drawGhosts(now, dt) {
     }
     // Ghost copies: the shared placement (true past positions, at identity), rendered as tinted silhouettes
     // (drawn unglowed in mask space, body cut out, THEN glowed, so a still body gets no halo around it)
-    const nG = ghostOn && (off || modes.trail) ? trailSlots(now, GHOST_COPIES) : 0;
+    const nG = ghostOn && (off || modes.trail || echo.trailFailed) ? trailSlots(now, GHOST_COPIES) : 0;
     if (nG) {
       if (!echo.gacc || echo.gacc.width !== echo.fw || echo.gacc.height !== echo.fh) echo.gacc = canvas2(echo.fw, echo.fh);
       const g = echo.gacc.getContext("2d"); g.globalCompositeOperation = "source-over"; g.globalAlpha = 1; g.clearRect(0, 0, echo.fw, echo.fh);
@@ -1329,10 +1335,11 @@ function drawGhosts(now, dt) {
     ctx.shadowBlur = 26; ctx.globalAlpha = 0.4;
     if (off && ghostOn) ctx.drawImage(tinted(echo.live, rgb(cur.c[2], 1)), ox, oy, dw, dh);   // Off: no camera image, this glow is the performer
     ctx.shadowBlur = 0; ctx.globalAlpha = 1;
-    const neonOn = look.echo === "neon";               // every ambience, Projection included: it is never drawn on the body
+    const neonOn = style === "neon";                   // every ambience, Projection included: it is never drawn on the body
     if (neonOn) {                                      // own canvas, under the performer's cut-out
       nctx.setTransform(perf.mirror ? -1 : 1, 0, 0, 1, perf.mirror ? ncv.width : 0, 0);
-      drawNeon(nctx, now, dt, s, ox, oy);
+      try { drawNeon(nctx, now, dt, s, ox, oy); }
+      catch (err) { echoFailed(err); nctx.setTransform(1, 0, 0, 1, 0, 0); nctx.clearRect(0, 0, ncv.width, ncv.height); }
       nctx.setTransform(1, 0, 0, 1, 0, 0);
     }
 
