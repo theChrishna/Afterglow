@@ -21,6 +21,9 @@
     transition: opacity 2.6s ease; }
   .bd.on { opacity: 1; }
   #fx { position: absolute; inset: 0; width: 100%; height: 100%; mix-blend-mode: screen; }
+  #comp { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+  #modePanel { display: none; position: absolute; left: 12px; top: 60px; z-index: 8; padding: 8px 10px; border-radius: 8px; background: rgba(0,0,0,.6); color: #eee; font: 12px/1.6 system-ui, sans-serif; }
+  #modePanel.on { display: block; } #modePanel label { display: block; } #modePanel input[type=range] { width: 110px; vertical-align: middle; }
   #ghost { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
   #tint { position: absolute; inset: 0; mix-blend-mode: soft-light; opacity: 0; transition: opacity 1.6s ease, background-color 1.6s ease; }
 
@@ -128,9 +131,16 @@
 <div id="stage">
   <div id="backdrop"><div class="bd"></div><div class="bd"></div></div>
   <canvas id="fx"></canvas>
+  <canvas id="comp"></canvas>
   <canvas id="ghost"></canvas>
   <video id="cam" playsinline muted></video>
   <div id="lat"></div>
+  <div id="modePanel">
+    <label><input type="checkbox" id="mMirror" checked> mirror (F)</label>
+    <label><input type="checkbox" id="mTrail"> echo trail</label>
+    <label data-for="projection">grow <input type="range" id="mGrow" min="0" max="30" value="8"> <span id="vGrow"></span></label>
+    <label>feather <input type="range" id="mFeather" min="0" max="12" value="3"> <span id="vFeather"></span></label>
+  </div>
   <div id="lyrics" data-anchor="center" title="Drag to place · double-click to follow you"></div>
   <div id="tint"></div>
   <div id="hud">
@@ -140,6 +150,7 @@
     <div id="controls">
       <button id="ptt" aria-label="Hold to speak a command">Hold for command</button>
       <button id="lyricsBtn" class="toggle" aria-pressed="false" title="Show everything you say or sing as lyrics (L)">Lyrics</button>
+      <button id="modeBtn" class="toggle" title="Performance mode: Off / Composite / Projection (M)">Mode: Off</button>
       <button id="perform" class="pill" aria-pressed="false" title="Ghost echo of your silhouette (camera, 3 min per visitor)">Perform</button>
       <input id="cue" type="text" maxlength="300" placeholder="…or type a cue and press Enter" autocomplete="off">
     </div>
@@ -335,7 +346,7 @@ function initGL() {
 }
 const RENDER_SCALE = 0.6;
 function resize() {
-  for (const c of [$("#fx"), $("#ghost")]) {
+  for (const c of [$("#fx"), $("#ghost"), $("#comp")]) {
     const s = c.id === "fx" ? RENDER_SCALE * Math.min(devicePixelRatio || 1, 1.5) : 1;
     c.width = Math.max(1, Math.round(innerWidth * s)); c.height = Math.max(1, Math.round(innerHeight * s));
   }
@@ -360,6 +371,7 @@ function frame(now) {
   }
   segmentLive(now);
   updateLatHud(now);
+  drawComp(now);
   drawGhosts(now, dt);
   placeLyrics(dt);
   requestAnimationFrame(frame);
@@ -821,7 +833,7 @@ function gpuMask(m, now) {
       const sh = (t, src) => { const o = gl.createShader(t); gl.shaderSource(o, src); gl.compileShader(o);
         if (!gl.getShaderParameter(o, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(o)); return o; };
       const pr = gl.createProgram();
-      gl.attachShader(pr, sh(gl.VERTEX_SHADER, "#version 300 es\nout vec2 uv;void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);uv=vec2(p.x,p.y);gl_Position=vec4(p*2.-1.,0,1);}"));
+      gl.attachShader(pr, sh(gl.VERTEX_SHADER, "#version 300 es\nout vec2 uv;void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);uv=vec2(p.x,1.-p.y);gl_Position=vec4(p*2.-1.,0,1);}"));
       gl.attachShader(pr, sh(gl.FRAGMENT_SHADER, "#version 300 es\nprecision mediump float;in vec2 uv;uniform sampler2D m;out vec4 o;void main(){float a=smoothstep(.35,.65,texture(m,uv).r);o=vec4(a,a,a,a);}"));
       gl.linkProgram(pr); if (!gl.getProgramParameter(pr, gl.LINK_STATUS)) throw new Error("link");
       echo.gprog = pr; echo.gvao = gl.createVertexArray();
@@ -972,9 +984,10 @@ function drawGhosts(now, dt) {
   ctx.clearRect(0, 0, W, H);
   if (perf.mirror) ctx.setTransform(-1, 0, 0, 1, W, 0);
 
+  const md = modes.mode;       // projection: no light on the performer, so no echo/glow at all
   // 1) SAM snapshots: crisp silhouettes released into a slow rise-and-fade afterglow.
   perf.ghosts = perf.ghosts.filter(g => now - g.born < 9000);
-  for (const g of perf.ghosts) {
+  for (const g of md === "off" ? perf.ghosts : []) {
     const age = (now - g.born) / 1000, alpha = 0.38 * Math.min(1, age / 0.6) * Math.exp(-age / 2.6);
     if (alpha < 0.01) continue;
     const [fw, fh] = g.frame, [x1, y1, x2, y2] = g.bounds, { s, ox, oy } = frameRect(W, H, fw, fh);
@@ -996,18 +1009,20 @@ function drawGhosts(now, dt) {
     tctx.globalCompositeOperation = "source-over";
     tctx.globalAlpha = 0.35; tctx.drawImage(echo.live, 0, 0); tctx.globalAlpha = 1;
 
+    const light = md === "composite" ? 0.5 : 1, showEcho = md === "off" || (md === "composite" && modes.trail);
     ctx.shadowColor = rgb(cur.c[2], 0.8); ctx.shadowBlur = 30;
-    ctx.globalAlpha = 0.42; ctx.drawImage(tinted(echo.trail, rgb(cur.c[1], 1)), ox, oy, dw, dh);
-    ECHO_DELAYS_S.forEach((lag, k) => {
+    ctx.globalAlpha = 0.42 * light;
+    if (showEcho) ctx.drawImage(tinted(echo.trail, rgb(cur.c[1], 1)), ox, oy, dw, dh);
+    (showEcho ? ECHO_DELAYS_S : []).forEach((lag, k) => {
       const past = pastMask(now, lag);
       if (!past) return;
-      ctx.globalAlpha = 0.26 - k * 0.07;
+      ctx.globalAlpha = (0.26 - k * 0.07) * light;
       const grow = 1 + 0.025 * (k + 1);
       ctx.drawImage(tinted(past, rgb(k % 2 ? cur.c[1] : cur.c[2], 1)),
         ox - (dw * (grow - 1)) / 2, oy - dh * (grow - 1), dw * grow, dh * grow);
     });
     ctx.shadowBlur = 26; ctx.globalAlpha = 0.4;
-    ctx.drawImage(tinted(echo.live, rgb(cur.c[2], 1)), ox, oy, dw, dh);
+    if (md === "off") ctx.drawImage(tinted(echo.live, rgb(cur.c[2], 1)), ox, oy, dw, dh);
 
     if (echo.frameBox) {     // performer box in screen space (un-mirrored) for lyric placement
       const [x1, y1, x2, y2] = echo.frameBox, sx = W / innerWidth;
@@ -1019,6 +1034,61 @@ function drawGhosts(now, dt) {
   }
   ctx.globalAlpha = 1; ctx.shadowBlur = 0;
   ctx.setTransform(1, 0, 0, 1, 0, 0);
+}
+
+// ---------------------------------------------------------------- performance modes
+// off = the original ghost echo; composite = live webcam with the background removed;
+// projection = black live silhouette over the performer (scenery everywhere else, no light on the person).
+const modes = { mode: "off", grow: 8, feather: 3, trail: false };
+try { Object.assign(modes, JSON.parse(localStorage.getItem("afterglow.modes") || "{}"), { mode: "off" }); } catch {}
+function saveModes() { try { localStorage.setItem("afterglow.modes", JSON.stringify({ grow: modes.grow, feather: modes.feather, trail: modes.trail, mirror: perf.mirror })); } catch {} }
+try { const sv = JSON.parse(localStorage.getItem("afterglow.modes") || "{}"); if (typeof sv.mirror === "boolean") perf.mirror = sv.mirror; } catch {}
+const MODE_NAMES = { off: "Off", composite: "Composite", projection: "Projection" };
+function setMode(m) {
+  modes.mode = m;
+  $("#modeBtn").textContent = "Mode: " + MODE_NAMES[m]; $("#modeBtn").setAttribute("aria-pressed", m === "off" ? "false" : "true");
+  $("#modePanel").classList.toggle("on", m !== "off");
+  $("#modePanel [data-for=projection]").style.display = m === "projection" ? "" : "none";
+  if (m === "off") $("#comp").getContext("2d").clearRect(0, 0, $("#comp").width, $("#comp").height);
+  if (m !== "off" && !perf.on) performOn();
+}
+function cycleMode() { setMode({ off: "composite", composite: "projection", projection: "off" }[modes.mode]); }
+const comp = { tmp: canvas2(2, 2), tmp2: canvas2(2, 2) };
+function drawComp(now) {
+  const cv = $("#comp"), ctx = cv.getContext("2d"), W = cv.width, H = cv.height;
+  if (modes.mode === "off" || !perf.on || !echo.live || now - echo.lastSegAt > 1000) { if (comp.dirty) { ctx.clearRect(0, 0, W, H); comp.dirty = false; } return; }
+  const fw = echo.fw, fh = echo.fh, { s, ox, oy } = frameRect(W, H, fw, fh), dw = fw * s, dh = fh * s;
+  for (const t of [comp.tmp, comp.tmp2]) if (t.width !== fw || t.height !== fh) { t.width = fw; t.height = fh; }
+  const t = comp.tmp.getContext("2d");
+  t.globalCompositeOperation = "copy"; t.filter = "none";
+  if (modes.mode === "composite") {
+    t.drawImage($("#cam"), 0, 0, fw, fh);                       // live webcam ...
+    t.globalCompositeOperation = "destination-in";               // ... with the mask as alpha (current mask, no delay)
+    t.filter = modes.feather ? `blur(${Math.min(3, modes.feather)}px)` : "none"; t.drawImage(echo.live, 0, 0); t.filter = "none";
+  } else {
+    const g = modes.grow, t2 = comp.tmp2.getContext("2d");       // grow: dilate by stamping the mask around a circle
+    t2.globalCompositeOperation = "copy"; t2.drawImage(echo.live, 0, 0);
+    t2.globalCompositeOperation = "source-over";
+    const taps = g ? 16 : 0;
+    for (let i = 0; i < taps; i++) { const a = (i / taps) * Math.PI * 2; t2.drawImage(echo.live, Math.cos(a) * g / s * 1, Math.sin(a) * g / s * 1); }
+    t.filter = modes.feather ? `blur(${modes.feather / Math.max(s, 0.1)}px)` : "none";
+    t.drawImage(comp.tmp2, 0, 0); t.filter = "none";
+    t.globalCompositeOperation = "source-in"; t.fillStyle = "#000"; t.fillRect(0, 0, fw, fh);
+  }
+  t.globalCompositeOperation = "source-over";
+  ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, W, H);
+  if (perf.mirror) ctx.setTransform(-1, 0, 0, 1, W, 0);
+  ctx.imageSmoothingQuality = "low"; ctx.drawImage(comp.tmp, ox, oy, dw, dh);
+  ctx.setTransform(1, 0, 0, 1, 0, 0); comp.dirty = true;
+}
+function wireModes() {
+  $("#modeBtn").addEventListener("click", cycleMode);
+  const bind = (id, key, out) => { const el = $("#" + id); el.value = modes[key]; if (out) $("#" + out).textContent = modes[key] + " px";
+    el.addEventListener("input", () => { modes[key] = +el.value; if (out) $("#" + out).textContent = el.value + " px"; saveModes(); }); };
+  bind("mGrow", "grow", "vGrow"); bind("mFeather", "feather", "vFeather");
+  $("#mMirror").checked = perf.mirror; $("#mMirror").addEventListener("change", e => { perf.mirror = e.target.checked; saveModes(); });
+  $("#mTrail").checked = modes.trail; $("#mTrail").addEventListener("change", e => { modes.trail = e.target.checked; saveModes(); });
+  setMode("off");
 }
 
 // ---------------------------------------------------------------- input wiring
@@ -1036,7 +1106,8 @@ function wireInput() {
     if (k === "h") $("#hud").classList.toggle("hidden");
     else if (k === "p") perf.on ? performOff() : performOn();
     else if (k === "l") ly.on || ly.pending ? lyricsOff() : lyricsOn();
-    else if (k === "m") perf.mirror = !perf.mirror;
+    else if (k === "m") cycleMode();
+    else if (k === "f") { perf.mirror = !perf.mirror; $("#mMirror").checked = perf.mirror; saveModes(); }
     else if (k === "t") $("#lat").classList.toggle("on");
     else if (k === "e") {
       ly.effect = EFFECTS[(EFFECTS.indexOf(ly.effect) + 1) % (EFFECTS.length + 1)] || "auto";
@@ -1063,7 +1134,7 @@ function wireInput() {
 try { initGL(); } catch (err) { console.warn("WebGL unavailable; backdrop-only mode", err); fx.gl = null; }
 resize(); addEventListener("resize", resize);
 requestAnimationFrame(frame);
-wireInput();
+wireInput(); wireModes();
 connect();
 $("#go").addEventListener("click", async () => {
   $("#start").remove();
