@@ -79,6 +79,13 @@
   .btn[aria-pressed="true"], .btn[aria-expanded="true"] { border-color: var(--accent); color: #fff; box-shadow: inset 0 0 0 1px var(--accent); }
   .btn svg { width: 18px; height: 18px; flex: none; }
   .btn.icon { padding: 0; width: 44px; }
+  .seg { flex: 0 0 auto; display: inline-flex; min-height: 44px; border: 1px solid var(--hair); border-radius: 999px; overflow: hidden;
+    background: var(--glass); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); }
+  .segb { min-height: 44px; padding: 0 14px; border: 0; background: transparent; color: var(--ui-dim); cursor: pointer;
+    font-weight: 600; font-size: 12px; line-height: 1; font-family: inherit; letter-spacing: .12em; text-transform: uppercase; }
+  .segb[aria-checked="true"] { color: #fff; background: rgba(231,77,158,.3); box-shadow: inset 0 0 0 1px var(--accent); border-radius: 999px; }
+  #more details { margin-top: 12px; } #more summary { cursor: pointer; font-weight: 600; font-size: 11px; letter-spacing: .18em; text-transform: uppercase;
+    color: var(--accent); min-height: 32px; display: flex; align-items: center; }
   :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   #ptt { min-height: 52px; padding: 0 22px; font-size: 13px; background: rgba(231,77,158,.22); border-color: rgba(231,77,158,.55);
     touch-action: none; user-select: none; -webkit-user-select: none; transition: background .15s, transform .15s; }
@@ -183,12 +190,13 @@
   #start small { display: block; margin-top: 14px; color: var(--ui-dim); }
   .kbd { display: inline-block; padding: 0 6px; border: 1px solid rgba(255,255,255,.35); border-radius: 4px; font-size: 12px; }
   @media (max-width: 560px) { #mood { display: none; } .btn { padding: 0 8px; font-size: 11px; letter-spacing: .08em; } #ptt { flex: 1 1 100%; }
-    #controls { gap: 6px; }
-    #chips { bottom: calc(132px + env(safe-area-inset-bottom)); flex-wrap: nowrap; overflow-x: auto; justify-content: flex-start; scrollbar-width: none;
+    #controls { gap: 6px; } #ambSwitch { flex: 1 1 100%; order: 1; } .segb { flex: 1; }
+    #lyricsBtn, #lookBtn, #modeBtn, #perform, #soundBtn, #moreBtn { order: 2; }   /* mic row, then the switch, then the buttons */
+    #chips { bottom: calc(184px + env(safe-area-inset-bottom)); flex-wrap: nowrap; overflow-x: auto; justify-content: flex-start; scrollbar-width: none;
       -webkit-mask-image: linear-gradient(90deg, #000 85%, transparent); mask-image: linear-gradient(90deg, #000 85%, transparent); }
     #chips::-webkit-scrollbar { display: none; } .chipbtn { flex: none; }
-    #hint { bottom: calc(184px + env(safe-area-inset-bottom)); white-space: normal; text-align: center; width: calc(100% - 32px); }
-    #caption { bottom: calc(232px + env(safe-area-inset-bottom)); } #more { bottom: calc(176px + env(safe-area-inset-bottom)); max-height: calc(100% - 240px); } }
+    #hint { bottom: calc(236px + env(safe-area-inset-bottom)); white-space: normal; text-align: center; width: calc(100% - 32px); }
+    #caption { bottom: calc(284px + env(safe-area-inset-bottom)); } #more { bottom: calc(228px + env(safe-area-inset-bottom)); max-height: calc(100% - 292px); } }
 </style>
 </head>
 <body>
@@ -237,7 +245,11 @@
       <button id="ptt" class="btn" aria-label="Hold to speak a command"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg><span>Hold to speak</span></button>
       <button id="lyricsBtn" class="btn" aria-pressed="false" title="Show everything you say or sing as lyrics (L)">Lyrics</button>
       <button id="lookBtn" class="btn" type="button" aria-label="Look: Reel. Switch to Classic">Reel</button>
-      <button id="modeBtn" class="btn" aria-pressed="false" title="Performance mode: Off / Composite / Projection (M)">Mode</button>
+      <div id="ambSwitch" class="seg" role="radiogroup" aria-label="Ambience mode">
+        <button class="segb" type="button" role="radio" aria-checked="true" data-amb="composite" title="Replace: you are cut out of the camera and placed inside the ambience">Replace</button>
+        <button class="segb" type="button" role="radio" aria-checked="false" data-amb="overlay" title="Overlay: the ambience is projected over the live camera">Overlay</button>
+      </div>
+      <button id="modeBtn" class="btn" aria-pressed="false" title="Camera ambience on or off (M cycles Off, Replace, Overlay)">Mode</button>
       <button id="perform" class="btn icon" aria-pressed="false" aria-label="Camera off. Turn on the camera (3 min per visitor)" title="Camera (P)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7h3l2-3h8l2 3h3v13H3z"/><circle cx="12" cy="13" r="4"/></svg></button>
       <button id="soundBtn" class="btn icon" type="button" aria-pressed="false" aria-label="Ambient sound off. Turn it on" title="Ambient sound (S)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9h4l5-4v14l-5-4H4z"/><path class="wave" d="M16.5 8.5a5 5 0 0 1 0 7M19 6a8.5 8.5 0 0 1 0 12"/><path class="mute" d="M17 9l5 6M22 9l-5 6"/></svg></button>
       <button id="moreBtn" class="btn" aria-expanded="false" aria-controls="more">More</button>
@@ -246,18 +258,14 @@
       <h3>Type a cue</h3>
       <input id="cue" type="text" maxlength="300" placeholder="Type a mood and press Enter" autocomplete="off" aria-label="Type a cue">
       <div id="modePanel">
-        <h3>Camera mode</h3>
+        <h3>Camera ambience</h3>
         <label><input type="checkbox" id="mMirror" checked> Mirror (F)</label>
-        <label><input type="checkbox" id="mTrail"> Echo trail</label>
-        <label data-for="projection">Grow <input type="range" id="mGrow" min="0" max="30" value="8"> <span id="vGrow"></span></label>
-        <label>Feather <input type="range" id="mFeather" min="0" max="12" value="3"> <span id="vFeather"></span></label>
-        <div class="row" data-for="projection"><button class="btn" id="calBtn" type="button">Calibrate (C)</button></div>
+        <label><input type="checkbox" id="mTrail"> Echo trail (Replace)</label>
       </div>
       <h3>Look</h3>
       <div class="row"><button class="btn" id="presetReel" type="button">Reel look</button><button class="btn" id="presetClassic" type="button">Classic</button></div>
       <label>Background <select id="roomSel" aria-label="Background"><option value="1">Violet room</option><option value="0">Moods and backdrops</option></select></label>
       <label>Echo <select id="echoSel" aria-label="Echo style"><option value="neon">Neon contour</option><option value="ghost">Ghost (classic)</option></select></label>
-      <label data-for="projection"><input type="checkbox" id="optLight"> Light on performer (Projection)</label>
       <h3>Lyrics</h3>
       <label>Style <select id="lyricSel" aria-label="Lyric style"><option value="hand">Handwritten</option><option value="kinetic">Kinetic</option></select></label>
       <label><input type="checkbox" id="optFollow" checked> Follow subject</label>
@@ -267,6 +275,13 @@
       <label><input type="checkbox" id="optInfo"> Stage info (which model made what)</label>
       <label><input type="checkbox" id="optLat"> Latency readout (T)</label>
       <div class="row"><button class="btn" id="demoBtn2" type="button">Watch the demo</button></div>
+      <details id="adv">
+        <summary>Advanced: physical projector</summary>
+        <div class="row"><button class="btn" id="projBtn" type="button" aria-pressed="false">Projection (black cut-out)</button><button class="btn" id="calBtn" type="button">Calibrate (C)</button></div>
+        <label>Grow <input type="range" id="mGrow" min="0" max="30" value="8"> <span id="vGrow"></span></label>
+        <label>Feather <input type="range" id="mFeather" min="0" max="12" value="3"> <span id="vFeather"></span></label>
+        <label><input type="checkbox" id="optLight"> Light on performer (no black cut-out)</label>
+      </details>
     </div>
     <div id="help" role="alertdialog" aria-labelledby="helpTitle"><h2 id="helpTitle"></h2><p id="helpText"></p><button class="btn" id="helpOk" type="button">Got it</button></div>
     <div id="prov" title="preset = premade, instant · Muse Spark = scene written live for your cue · Muse Image · new = backdrop generated live"></div>
@@ -1202,7 +1217,7 @@ function drawGhosts(now, dt) {
   ctx.clearRect(0, 0, W, H);
   if (perf.mirror) ctx.setTransform(-1, 0, 0, 1, W, 0);
 
-  const md = modes.mode;       // projection: no light on the performer, so no echo/glow at all
+  const md = effMode();        // projection: no light on the performer, so no echo/glow at all
   // 1) SAM snapshots: crisp silhouettes released into a slow rise-and-fade afterglow.
   perf.ghosts = perf.ghosts.filter(g => now - g.born < 9000);
   for (const g of md === "off" && look.echo === "ghost" ? perf.ghosts : []) {
@@ -1264,31 +1279,39 @@ function drawGhosts(now, dt) {
 // ---------------------------------------------------------------- performance modes
 // off = the original ghost echo; composite = live webcam with the background removed;
 // projection = black live silhouette over the performer (scenery everywhere else, no light on the person).
-const modes = { mode: "off", grow: 8, feather: 3, trail: false };
+// modes.mode: off | composite ("Replace" in the UI) | overlay | projection. modes.amb remembers the chosen
+// ambience (composite or overlay); the active mode itself always starts Off (no auto camera prompt).
+const modes = { mode: "off", amb: "composite", grow: 8, feather: 3, trail: false };
 try { Object.assign(modes, JSON.parse(localStorage.getItem("afterglow.modes") || "{}"), { mode: "off" }); } catch {}
-function saveModes() { try { localStorage.setItem("afterglow.modes", JSON.stringify({ grow: modes.grow, feather: modes.feather, trail: modes.trail, mirror: perf.mirror })); } catch {} }
+if (modes.amb !== "overlay") modes.amb = "composite";
+function saveModes() { try { localStorage.setItem("afterglow.modes", JSON.stringify({ amb: modes.amb, grow: modes.grow, feather: modes.feather, trail: modes.trail, mirror: perf.mirror })); } catch {} }
 try { const sv = JSON.parse(localStorage.getItem("afterglow.modes") || "{}"); if (typeof sv.mirror === "boolean") perf.mirror = sv.mirror; } catch {}
-const MODE_NAMES = { off: "Off", composite: "Composite", projection: "Projection" };
+const MODE_NAMES = { off: "Off", composite: "Replace", overlay: "Overlay", projection: "Projection" };
+// The mode actually drawn. Overlay is rendered like Replace until the camera layer exists (next step).
+const effMode = () => modes.mode === "overlay" ? "composite" : modes.mode;
 function setMode(m) {
   modes.mode = m;
-  $("#modeBtn").textContent = m === "off" ? "Mode" : MODE_NAMES[m]; $("#modeBtn").setAttribute("aria-pressed", m === "off" ? "false" : "true");
+  $("#modeBtn").setAttribute("aria-pressed", m === "off" ? "false" : "true");
   $("#modePanel").classList.toggle("on", m !== "off");
-  document.querySelectorAll("#more [data-for=projection]").forEach(el => el.style.display = m === "projection" ? "" : "none");
+  if (m === "composite" || m === "overlay") { modes.amb = m; saveModes(); }
+  document.querySelectorAll("#ambSwitch .segb").forEach(b => b.setAttribute("aria-checked", b.dataset.amb === modes.amb ? "true" : "false"));
+  $("#projBtn").setAttribute("aria-pressed", m === "projection" ? "true" : "false");
   if (m !== "projection" && cal.open) calOpen(false);
   if (m === "off") $("#comp").getContext("2d").clearRect(0, 0, $("#comp").width, $("#comp").height);
   if (m !== "off" && !perf.on) performOn();
   if (typeof cal !== "undefined") calApply();
 }
-function cycleMode() { setMode({ off: "composite", composite: "projection", projection: "off" }[modes.mode]); }
+function cycleMode() { setMode({ off: "composite", composite: "overlay", overlay: "off", projection: "off" }[modes.mode]); }
 const comp = { tmp: canvas2(2, 2), tmp2: canvas2(2, 2) };
 function drawComp(now) {
   const cv = $("#comp"), ctx = cv.getContext("2d"), W = cv.width, H = cv.height;
-  if (modes.mode === "off" || (modes.mode === "projection" && look.lightOn) || !perf.on || !echo.live || now - echo.lastSegAt > 1000) { if (comp.dirty) { ctx.clearRect(0, 0, W, H); comp.dirty = false; } return; }
+  const em = effMode();
+  if (em === "off" || (em === "projection" && look.lightOn) || !perf.on || !echo.live || now - echo.lastSegAt > 1000) { if (comp.dirty) { ctx.clearRect(0, 0, W, H); comp.dirty = false; } return; }
   const fw = echo.fw, fh = echo.fh, { s, ox, oy } = frameRect(W, H, fw, fh), dw = fw * s, dh = fh * s;
   for (const t of [comp.tmp, comp.tmp2]) if (t.width !== fw || t.height !== fh) { t.width = fw; t.height = fh; }
   const t = comp.tmp.getContext("2d");
   t.globalCompositeOperation = "copy"; t.filter = "none";
-  if (modes.mode === "composite") {
+  if (em === "composite") {
     t.drawImage($("#cam"), 0, 0, fw, fh);                       // live webcam ...
     t.globalCompositeOperation = "destination-in";               // ... with the mask as alpha (current mask, no delay)
     t.filter = modes.feather ? `blur(${Math.min(3, modes.feather) / Math.max(s, 0.1)}px)` : "none"; t.drawImage(echo.live, 0, 0); t.filter = "none";
@@ -1304,7 +1327,7 @@ function drawComp(now) {
   }
   t.globalCompositeOperation = "source-over";
   ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.clearRect(0, 0, W, H);
-  const fv = modes.mode === "projection" && cal.flipV;
+  const fv = em === "projection" && cal.flipV;
   ctx.setTransform(perf.mirror ? -1 : 1, 0, 0, fv ? -1 : 1, perf.mirror ? W : 0, fv ? H : 0);
   ctx.imageSmoothingQuality = "low"; ctx.drawImage(comp.tmp, ox, oy, dw, dh);
   ctx.setTransform(1, 0, 0, 1, 0, 0); comp.dirty = true;
@@ -1392,7 +1415,9 @@ function wireCalib() {
   addEventListener("resize", () => { if (cal.open) calPattern(); calApply(); });
 }
 function wireModes() {
-  $("#modeBtn").addEventListener("click", cycleMode);
+  $("#modeBtn").addEventListener("click", () => setMode(modes.mode === "off" ? modes.amb : "off"));   // on/off for the chosen ambience
+  document.querySelectorAll("#ambSwitch .segb").forEach(b => b.addEventListener("click", () => setMode(b.dataset.amb)));   // instant: no camera restart
+  $("#projBtn").addEventListener("click", () => setMode(modes.mode === "projection" ? "off" : "projection"));
   const bind = (id, key, out) => { const el = $("#" + id); el.value = modes[key]; if (out) $("#" + out).textContent = modes[key] + " px";
     el.addEventListener("input", () => { modes[key] = +el.value; if (out) $("#" + out).textContent = el.value + " px"; saveModes(); }); };
   bind("mGrow", "grow", "vGrow"); bind("mFeather", "feather", "vFeather");
