@@ -82,9 +82,9 @@
   #ghost { mix-blend-mode: difference; }
   #lat { position: absolute; right: 12px; top: 12px; z-index: 9; display: none; padding: 8px 10px; border-radius: 8px; background: rgba(0,0,0,.6); color: #9f9; font: 11px/1.45 ui-monospace, Menlo, monospace; white-space: pre; pointer-events: none; }
   #lat.on { display: block; }
-  #lyricsBtn { flex: 0 0 auto; border: 1px solid rgba(255,255,255,.22); border-radius: 999px; padding: 13px 16px; font: inherit;
+  #lyricsBtn, #modeBtn { flex: 0 0 auto; border: 1px solid rgba(255,255,255,.22); border-radius: 999px; padding: 13px 16px; font: inherit;
     font-size: 14px; color: #fff; background: rgba(0,0,0,.4); backdrop-filter: blur(10px); cursor: pointer; white-space: nowrap; }
-  #lyricsBtn[aria-pressed="true"] { background: rgba(255,255,255,.9); color: #000; border-color: transparent; }
+  #lyricsBtn[aria-pressed="true"], #modeBtn[aria-pressed="true"] { background: rgba(255,255,255,.9); color: #000; border-color: transparent; }
 
   /* Lyrics: kinetic type, positioned by JS (follows the performer or wherever it was dragged). */
   #lyrics { position: absolute; left: 0; top: 0; z-index: 3; width: max-content; max-width: min(72vw, 940px);
@@ -130,7 +130,7 @@
   #start small { display: block; margin-top: 14px; color: var(--ui-dim); }
   .kbd { display: inline-block; padding: 0 6px; border: 1px solid rgba(255,255,255,.35); border-radius: 4px; font-size: 12px; }
   @media (max-width: 560px) { #mood { max-width: 55%; } #timing { display: none; }
-    #perform, #lyricsBtn { padding: 13px 12px; }
+    #perform, #lyricsBtn, #modeBtn { padding: 13px 12px; }
     #controls { flex-wrap: wrap; } #cue { flex-basis: 100%; } #caption { bottom: calc(110px + env(safe-area-inset-bottom)); } }
 </style>
 </head>
@@ -172,7 +172,7 @@
     <div id="controls">
       <button id="ptt" aria-label="Hold to speak a command">Hold for command</button>
       <button id="lyricsBtn" class="toggle" aria-pressed="false" title="Show everything you say or sing as lyrics (L)">Lyrics</button>
-      <button id="modeBtn" class="toggle" title="Performance mode: Off / Composite / Projection (M)">Mode: Off</button>
+      <button id="modeBtn" class="toggle" title="Performance mode: Off / Composite / Projection (M)">Mode</button>
       <button id="perform" class="pill" aria-pressed="false" title="Ghost echo of your silhouette (camera, 3 min per visitor)">Perform</button>
       <input id="cue" type="text" maxlength="300" placeholder="…or type a cue and press Enter" autocomplete="off">
     </div>
@@ -185,7 +185,7 @@
       <h1>AFTERGLOW</h1>
       <p>Speak a cue and the stage answers: light and motion change at once, and a new backdrop drifts in a few seconds later.</p>
       <button id="go">Enter the stage</button>
-      <small>Hold <span class="kbd">Space</span> for a command · <span class="kbd">L</span> lyrics (say or sing anything) · <span class="kbd">E</span> lyric effect · <span class="kbd">P</span> perform (camera echo) · <span class="kbd">H</span> hide controls</small>
+      <small>Hold <span class="kbd">Space</span> for a command · <span class="kbd">L</span> lyrics (say or sing anything) · <span class="kbd">E</span> lyric effect · <span class="kbd">P</span> perform (camera echo) · <span class="kbd">M</span> mode · <span class="kbd">C</span> calibrate · <span class="kbd">F</span> mirror · <span class="kbd">T</span> latency · <span class="kbd">H</span> hide controls</small>
     </div>
   </div>
 </div>
@@ -1068,7 +1068,7 @@ try { const sv = JSON.parse(localStorage.getItem("afterglow.modes") || "{}"); if
 const MODE_NAMES = { off: "Off", composite: "Composite", projection: "Projection" };
 function setMode(m) {
   modes.mode = m;
-  $("#modeBtn").textContent = "Mode: " + MODE_NAMES[m]; $("#modeBtn").setAttribute("aria-pressed", m === "off" ? "false" : "true");
+  $("#modeBtn").textContent = m === "off" ? "Mode" : MODE_NAMES[m]; $("#modeBtn").setAttribute("aria-pressed", m === "off" ? "false" : "true");
   $("#modePanel").classList.toggle("on", m !== "off");
   document.querySelectorAll("#modePanel [data-for=projection]").forEach(el => el.style.display = m === "projection" ? "" : "none");
   if (m !== "projection" && cal.open) calOpen(false);
