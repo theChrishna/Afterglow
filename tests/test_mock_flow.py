@@ -58,3 +58,27 @@ def test_lyrics_stream_mock():
         assert words and words[-1].startswith(words[0].split()[0])
         ws.send_json({"type": "lyrics_stop"})
         assert _until(ws, "lyrics_state")["on"] is False
+
+
+def test_no_backdrop_flag_skips_image_generation(monkeypatch):
+    from app import main
+    calls = []
+
+    async def fake_generate(self, scene, seq):
+        calls.append(seq)
+
+    monkeypatch.setattr(main.Stage, "generate_backdrop", fake_generate)
+    with TestClient(app) as c, c.websocket_connect("/ws/stage") as ws:
+        ws.receive_json()
+        ws.send_json({"type": "text_cue", "text": "Take us into deep space", "no_backdrop": True})
+        for _ in range(10):
+            m = ws.receive_json()
+            if m["type"] == "scene" and m["source"] != "instant":
+                break
+        ws.send_json({"type": "text_cue", "text": "Drop us underwater, calm and blue"})
+        for _ in range(10):
+            m = ws.receive_json()
+            if m["type"] == "scene" and m["source"] != "instant":
+                break
+        ws.receive_json()  # the ready status that follows the scene; by now the spawn has run
+    assert calls == [2]

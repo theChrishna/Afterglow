@@ -89,6 +89,7 @@ class Stage:
         self.asr_bytes = 0
         self.lyrics = None
         self.cue_seq = 0
+        self.ptt_backdrop = True   # False while the page's backdrops are hidden (Reel look): saves image credits
         self._send_lock = asyncio.Lock()
         self._tasks: set[asyncio.Task] = set()
 
@@ -152,6 +153,7 @@ class Stage:
             return
         kind = m.get("type")
         if kind == "ptt_start":
+            self.ptt_backdrop = not m.get("no_backdrop")
             await self.start_ptt()
         elif kind == "ptt_end":
             self.spawn(self.end_ptt())
@@ -165,7 +167,7 @@ class Stage:
                 if not limits.allow(self.ip, "cue"):
                     await self.status("limited", "Too many cues; wait a few seconds.")
                     return
-                self.spawn(self.handle_cue(text, time.perf_counter(), via="text"))
+                self.spawn(self.handle_cue(text, time.perf_counter(), via="text", backdrop=not m.get("no_backdrop")))
 
     # ---------------------------------------------------------------- lyrics (continuous speech)
 
@@ -267,9 +269,9 @@ class Stage:
             await self.status("ready", "Heard nothing.")
             return
         await self.send(type="transcript", final=True, text=text)
-        await self.handle_cue(text, t_release, via="voice")
+        await self.handle_cue(text, t_release, via="voice", backdrop=self.ptt_backdrop)
 
-    async def handle_cue(self, text: str, t0: float, via: str) -> None:
+    async def handle_cue(self, text: str, t0: float, via: str, backdrop: bool = True) -> None:
         self.cue_seq += 1
         seq = self.cue_seq
         # Instant keyword guess so the stage reacts within ~0.5 s; Spark's scene refines it.
@@ -295,7 +297,8 @@ class Stage:
                         source=model.name, cue=text)
         log_stage("cue_to_scene", (time.perf_counter() - t0) * 1000, True, model.name, via=via)
         await self.status("ready", "" if live or config.MOCK else "Offline mode: daily budget reached.")
-        self.spawn(self.generate_backdrop(self.scene, seq))
+        if backdrop:
+            self.spawn(self.generate_backdrop(self.scene, seq))
 
     async def generate_backdrop(self, scene: Scene, seq: int) -> None:
         if not limits.allow(self.ip, "image"):
