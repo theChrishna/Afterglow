@@ -7,7 +7,7 @@ they say or sing appears as lyrics.
 
 Live: https://afterglow-chia.onrender.com (Render free plan; the first load after idle is slow)
 
-*Built during the hackathon.*
+*Built during the Meta Global AI Developer Hackathon.*
 
 ## Run it
 
@@ -63,16 +63,18 @@ See [DEMO.md](DEMO.md) for the cue script.
 
 ## Models used (and who made them)
 
-| Job | Model | Where it runs | Maker |
+| Job | Model (id in `app/config.py`) | Where it runs | Maker |
 |---|---|---|---|
-| Speech to text (commands, lyrics) | Muse Voice Transcribe | Meta Model API | Meta |
-| Cue to scene JSON | Muse Spark | Meta Model API | Meta |
-| Backdrops (8 pre-generated, new ones live) | Muse Image | Meta Model API | Meta |
-| Snapshot silhouette every 6 s ("afterglow" layer) | SAM 3.1 | Meta Model API | Meta |
-| **Real-time silhouette (echo, modes)** | **MediaPipe selfie segmenter** | **On-device, in the browser** | **Google, not Meta** |
+| Speech to text (voice cues, lyrics) | Muse Voice Transcribe (`muse-voice-transcribe-1.0`) | Meta Model API | Meta |
+| Cue to scene JSON | Muse Spark (`muse-spark-1.3`) | Meta Model API | Meta |
+| Backdrops (8 pre-generated, new ones live in the Classic look) | Muse Image (`muse-image-1.0`) | Meta Model API | Meta |
+| Snapshot silhouette every 6 s (the "afterglow" layer, Off mode) | SAM 3.1 (`sam-3.1`) | Meta Model API | Meta |
+| **Live silhouette (cut-out, echo trail, Projection)** | **MediaPipe Tasks Vision selfie segmenter** | **On-device, in the browser** | **Google, not Meta** |
 
-The real-time silhouette is a Google on-device model. Only the slower 6 s snapshot layer uses
-Meta's SAM 3.1.
+The live silhouette that drives the cut-out and the echo trail is Google's MediaPipe, running on
+the visitor's device; no camera frames leave the browser for it. Only the slower 6 s snapshot
+layer uses Meta's SAM 3.1. The ambient sound pad and the lyric transliteration are plain code, not
+models.
 
 ## Ambience: Replace or Overlay
 
@@ -120,7 +122,24 @@ with real speakers.
 
 ## Latency
 
-Measured with the on-screen readout (**T**) in the Chromium-based in-app browser on a Mac, using a **synthetic camera**
+**Cloud pipeline**, measured by the live server on Render (`/api/health`, which keeps a median and
+p90 per stage), on 2026-11-05 after the final deploy, from a session that sent recorded cues
+through the real voice and lyrics paths:
+
+| Stage (live server) | n | Median | p90 |
+|---|---|---|---|
+| Speech socket connect (Muse Voice Transcribe) | 12 | 671 ms | 728 ms |
+| Final transcript after releasing the mic button | 8 | 142 ms | 154 ms |
+| Cue to instant look (keyword scene, no model call) | 5 | 147 ms | 154 ms |
+| Muse Spark call | 8 | 5.73 s | 6.49 s |
+| Cue to refined scene (Spark result on screen) | 7 | 5.81 s | 6.23 s |
+| Muse Image backdrop | 3 | 8.09 s | 8.09 s |
+| SAM 3.1 snapshot (server round trip) | 31 | 950 ms | 1.43 s |
+
+These are small samples from one network location; they are server-side timings and do not
+include the visitor's own network.
+
+**On-device**, measured with the on-screen readout (**T**) in the Chromium-based in-app browser on a Mac, using a **synthetic camera**
 (a 640×360 canvas stream of a still photo, nudged each frame). Not measured with a real webcam.
 
 | | Before (`stable-1100`) | After |
@@ -133,7 +152,7 @@ Measured with the on-screen readout (**T**) in the Chromium-based in-app browser
 | Per-frame allocations in the mask path | 1 canvas per frame | none (fixed 64-slot ring, ~1 s at 60 fps) |
 | Camera request | 640×360 | 640×360, 60 fps ideal (24 min) |
 | Draw loop in Projection (grow 8, feather 3) | n/a | 16.7 ms (holds 60 Hz) |
-| Draw loop with Neon contour (Reel look) | n/a | 16.7 ms (holds 60 Hz); neon drawing ~0.4–0.5 ms on the main thread |
+| Draw loop with Neon contour (Reel look), measured on the earlier outline-row version | n/a | 16.7 ms (holds 60 Hz); neon drawing ~0.4–0.5 ms on the main thread then (the current trail is the next row) |
 | Neon draw cost, true-position trail (Claude desktop browser pane, page in background, synthetic 640x360 silhouette panning) | old side-row trail: ~3.3 ms (Full), ~5.9 ms (Motion only) | ~3.2 ms in either mode (one outline per snapshot, one cut-out per frame, no per-copy diffs). Real-camera fps not measured. |
 
 What changed: segmentation is driven by `requestVideoFrameCallback` (falls back to
@@ -157,18 +176,34 @@ allocation is a 16×9 brightness sample twice a second while Overlay is on.
 
 ## Not verified
 
-- A real webcam (all numbers above use a synthetic canvas camera).
-- A real projector: Projection mode and calibration were checked on screen only.
-- Overlay on a real camera and in a real room: the blend choice and the 1.5× soft-light boost were
-  tuned by eye on a synthetic dark room and a bright room (a photo on flat colour), not on real
-  rooms, projectors or webcams; the brightness thresholds (0.5 up, 0.38 down) are untuned.
-- Phones and tablets: layout checked at 375 px wide in a desktop browser, not on a device.
-- Singing or speech accuracy of the handwritten lyrics: tested by feeding words to the page,
-  not with a live voice (no mic in the test browser).
+- A real webcam and a moving person. The camera numbers above, the cut-out and the echo trail were
+  checked with a synthetic camera (a still photo panning or bobbing inside a canvas stream).
+- Live voice and singing. Voice cues and lyrics were verified on the live site with a recorded
+  spoken cue fed in as the microphone, not with someone speaking or singing live.
 - Hinglish lyrics: the transliteration was tested on typed Hindi text. Whether the live speech
-  service returns Hindi as Devanagari, Latin or a translation, with `languageBias: ["English"]`,
-  was not checked with a real voice.
-- Head-following and the pose-history row were checked with a synthetic subject (a photo panning
-  over a plain wall), not a moving person.
-- Safari and Firefox: `requestVideoFrameCallback`, canvas `filter` (feather) and the GPU mask
-  path may behave differently; the fallbacks are in place but were not exercised there.
+  service returns Hindi as Devanagari, Latin or a translation was not checked with a real voice.
+- A real projector: Projection mode and calibration were checked on screen only.
+- Overlay in a real room: the blend choice and the soft-light boost were tuned by eye on synthetic
+  dark and bright rooms; the brightness thresholds are untuned.
+- Phones and tablets: layout checked at 375 px wide in a desktop browser, not on a device.
+- Safari and Firefox: `requestVideoFrameCallback`, canvas filters and the GPU mask path may behave
+  differently; the fallbacks are in place but were not exercised there.
+- Real frame rates with a real camera, and the GPU compositing cost of the blended layers.
+
+## Known issues
+
+- The camera turns off when the tab or window is hidden (by design, to save the per-visitor
+  camera time). Press the camera button again after switching back.
+- If MediaPipe rejects a frame timestamp (seen after quickly turning the camera off and on), the
+  error is thrown inside the segmentation loop and stops it, so the mask freezes until the page is
+  reloaded. Not fixed in this version.
+
+## Next steps (not merged)
+
+- **Song mode** (sing along to a known song, its lines shown as lyrics): branch
+  `feature/song-lyrics` on GitHub.
+- **Landing page**: branch `feature/landing`, local to the development machine, not pushed.
+- **Audio-reactive background** (the ambience brightens with the mic level, with a strobe limit):
+  branch `feature/audio-react`, local, work in progress.
+- Fix the segmentation-loop timestamp issue above, and move inference to a worker.
+- Test with real webcams, live voices, phones, Safari and Firefox, and a real projector.
