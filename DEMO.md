@@ -38,13 +38,18 @@ which plays cues 1–8 here, 11 s apart, with a caption (Stop or Esc ends it).
 - **Reel** (default; the **Reel look** chip, the Reel/Classic button, or `?preset=reel`): Violet room,
   Neon contour pose-history row, handwritten lyrics above your head. Deterministic, so takes are
   reproducible. Backdrops are hidden and not generated.
-- **Classic**: moods with Muse Image backdrops, ghost echo, kinetic lyrics.
+- **Classic**: moods with Muse Image backdrops, ghost echo.
+- Lyrics are **handwritten** in every scene (More > Lyrics > Style switches to Kinetic).
 
-## Performance modes (camera)
+## Ambience (camera)
 
-- **M** cycles Off → Composite → Projection. Composite puts the performer, cut out, onto the stage.
-  Projection blacks out the performer's silhouette so a projector doesn't light them.
-- In Projection, press **C** to calibrate: drag the 4 corners onto the stage, then adjust offset and scale.
+- The **Replace | Overlay** switch sits next to **Mode**. **Replace** cuts you out of the camera and
+  puts you inside the ambience. **Overlay** shows the live camera and projects the ambience over your
+  real room (strength slider and Keep me clear / Light on me under More). **Mode** turns it on and
+  off; **M** cycles Off → Replace → Overlay.
+- Overlay needs the camera: without it the page shows a prompt and looks like Replace meanwhile.
+- **More > Advanced: physical projector** has Projection (a black cut-out so a real projector doesn't
+  light you); press **C** to calibrate: drag the 4 corners onto the stage, then adjust offset and scale.
 - **F** mirror, **T** latency readout, **L** lyrics, **P** camera, **S** ambient sound (off by default), **H** hide controls, **Esc** stop the demo.
 
 ## If something goes wrong

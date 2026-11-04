@@ -24,7 +24,7 @@ scenes, no API calls and no key needed. Tests: `.venv/bin/python -m pytest`.
 
 - **Enter the stage**, then hold **Space** or the mic button and say a mood. The mic is only
   requested the first time you use it. The camera only starts when you press the camera button,
-  choose a Mode, or click Reel look.
+  choose a Replace/Overlay ambience, or click Reel look.
 - No mic? Tap a **mood chip** (Rain, Neon, Forest, Space, Fire, Ocean). Chips use the same scene
   pipeline as a spoken cue. **Watch the demo** plays the DEMO.md cues 11 s apart with a caption;
   Stop or Esc ends it.
@@ -36,7 +36,12 @@ scenes, no API calls and no key needed. Tests: `.venv/bin/python -m pytest`.
 | Preset | Background | Echo | Lyrics |
 |---|---|---|---|
 | **Reel** (default) | *Violet room*: lit wall gradient, brighter ceiling band, pink floor strip, slow breathing. Cues tint it. | *Neon contour*: a live outline (no added delay) plus a motion trail. Past outlines from the last ~0.7 s (every 110 ms) are drawn where each person actually was, and anything inside where they are now is cut away. So a still person has no trail, a moving person leaves copies along their path, and each person in frame gets their own trail. Pink outer, orange/yellow inner, additive glow, older copies dimmer. | *Handwritten*: up to 2 lines, revealed letter by letter, one line above the performer's head (with several people in frame, the highest head) with an eased follow. Each phrase uses the next font in a fixed order (Caveat, Gaegu, Shadows Into Light, Reenie Beanie, Fraunces). Optional HUD details: cursor box, x/y readout, hairline leader lines. |
-| **Classic** | Moods with Muse Image backdrops | Ghost (difference-blend silhouette, trail, delayed copies) | Kinetic type, 6 effects |
+| **Classic** | Moods with Muse Image backdrops | Ghost (difference-blend silhouette, trail, delayed copies) | (same as Reel: the lyric style is its own setting) |
+
+- **Handwritten is the default lyric style in every scene**, Reel or Classic. It is saved
+  separately from the preset (More > Lyrics > Style). **Kinetic** (six scene-matched effects, with
+  the Effect picker) is an option there. HUD details (cursor box, coordinates, hairlines) are on by
+  default and toggleable; an older saved Classic look that forced Kinetic is migrated to Handwritten.
 
 - Switch with the **Reel/Classic** button, the **Reel look** chip, or under More. The choice is
   saved in this browser.
@@ -69,18 +74,34 @@ See [DEMO.md](DEMO.md) for the cue script.
 The real-time silhouette is a Google on-device model. Only the slower 6 s snapshot layer uses
 Meta's SAM 3.1.
 
-## Performance modes
+## Ambience: Replace or Overlay
 
-Switch with the **Mode** button, or press **M** (Off → Composite → Projection). Choosing a mode
-turns the camera on. The echo style (Neon contour or Ghost) comes from the current look.
+Pick **Replace** or **Overlay** with the two-option switch on the main bar (next to Mode). **Mode**
+turns the chosen ambience on or off; **M** cycles Off → Replace → Overlay → Off. Choosing one turns
+the camera on if it isn't. Switching between them is instant: it never restarts the camera or the
+segmenter. The neon echo, lyrics and status UI draw above both. The choice and the strength are
+saved in this browser; the ambience always starts Off, with no automatic camera prompt.
 
 | Mode | What the audience sees |
 |---|---|
 | **Off** (default) | The original ghost echo: glowing live silhouette, a rising trail and delayed copies, plus SAM 3.1 snapshots. |
-| **Composite** | The live webcam with the background removed (mask as alpha, 2–3 px feather) over the backdrop and shader, under the lyrics. Echo trail optional (off by default, drawn at half strength). |
-| **Projection** | For a projector pointed at the performer: scenery everywhere except a live **black** silhouette over the performer, so no light lands on them. **Grow** (0–30 px) widens the black area; **feather** softens its edge. No echo or glow, unless **Light on performer** is ticked (More): then there's no black silhouette and the neon outlines land on the body. |
+| **Replace** (cut-out) | The performer is cut out of the camera feed (mask as alpha, 2–3 px feather) and placed inside the ambience (backdrop and shader), under the lyrics. Echo trail optional (off by default, half strength). |
+| **Overlay** | The live camera is the base layer (mirror respected) and the ambience is drawn on top of your real room with transparency, like a projector lighting it. **Ambience strength** (10–90%, default 55%) is in More. **Light on me** (default) lets the light fall on you too; **Keep me clear** draws you back over the ambience (85%) using the person mask so you aren't washed out. |
 
-**Calibration** (Projection mode, press **C**): drag the 4 corner handles until the grid and
+**Overlay blend:** `screen` reads as projected light in a dark room but turns a bright wall white;
+`soft-light` keeps a bright room's detail but shows almost nothing in a dark one (black stays
+black). So the page picks per room from the camera's brightness, sampled twice a second with
+hysteresis: `screen` in dark rooms, `soft-light` (strength × 1.5, capped at 100%) in bright ones.
+Without live camera frames (camera off or blocked), Overlay shows "Turn on the camera to overlay the
+stage on your room" with a button and meanwhile looks like Replace, never a blank screen. On a
+portrait phone the 16:9 camera frame sits at the bottom of the screen, as the echo does.
+
+**Advanced: physical projector** (More > Advanced) keeps **Projection**: scenery everywhere except
+a live **black** silhouette over the performer, so no light lands on them. **Grow** (0–30 px)
+widens the black area; **feather** softens its edge. No echo or glow, unless **Light on performer**
+is ticked: then there's no black silhouette and the neon outlines land on the body.
+
+**Calibration** (Projection: **Calibrate** under Advanced, or press **C**): drag the 4 corner handles until the grid and
 crosshairs line up with the stage (a homography), then fine-tune offset X/Y and scale, and set
 mirror or flip up/down. The warp is a CSS `matrix3d` on the silhouette layer, so it adds no
 per-frame cost. Settings are saved in this browser's localStorage.
@@ -88,7 +109,7 @@ per-frame cost. Settings are saved in this browser's localStorage.
 ## Shortcuts
 
 Everything has an on-screen control; keys are optional. **Space** hold to speak · **L** lyrics ·
-**P** camera · **M** mode · **C** calibrate · **F** mirror · **E** kinetic lyric effect ·
+**P** camera · **M** cycle Off/Replace/Overlay · **C** calibrate (Projection) · **F** mirror · **E** Kinetic lyric effect ·
 **T** latency readout · **S** ambient sound · **H** hide controls · **Esc** stop demo / close panels.
 
 **Ambient sound** (speaker button, off by default, never saved as on): a soft Web Audio pad, with
@@ -124,10 +145,22 @@ Not measured: true camera-to-photon lag. With the synthetic camera the browser g
 sensor or display latency. The segmenter's GPU time is also not captured by these main-thread
 timings. Inference stays on the main thread; moving it to a worker was not attempted.
 
+**Frame rate per ambience mode** (fake camera, in-app browser pane, 1280×720): the pane drew at
+about 35 fps in *every* mode including Off (Off 28.7 ms, Replace 28.0, Overlay with Light on me 31.0,
+Overlay with Keep me clear 26.9, Projection 28.4 ms per draw frame), so differences between modes
+are within that pane's own frame pacing and noise, not measurable here. The main-thread JavaScript
+for the camera/ambience/echo draw path measured under 0.1 ms per frame in all modes (timer
+resolution). GPU compositing cost of the two blended full-screen layers was **not** measured, and no
+real-camera fps was measured. The current-frame path allocates nothing per frame; the only
+allocation is a 16×9 brightness sample twice a second while Overlay is on.
+
 ## Not verified
 
 - A real webcam (all numbers above use a synthetic canvas camera).
 - A real projector: Projection mode and calibration were checked on screen only.
+- Overlay on a real camera and in a real room: the blend choice and the 1.5× soft-light boost were
+  tuned by eye on a synthetic dark room and a bright room (a photo on flat colour), not on real
+  rooms, projectors or webcams; the brightness thresholds (0.5 up, 0.38 down) are untuned.
 - Phones and tablets: layout checked at 375 px wide in a desktop browser, not on a device.
 - Singing or speech accuracy of the handwritten lyrics: tested by feeding words to the page,
   not with a live voice (no mic in the test browser).
