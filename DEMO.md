@@ -29,6 +29,13 @@ replacing the mood.
 4. Cue 7 (relative change), then cue 8.
 5. Press **H** to hide the controls for a clean final look.
 
+## Performance modes (camera)
+
+- **M** cycles Off → Composite → Projection. Composite puts the performer, cut out, onto the stage.
+  Projection blacks out the performer's silhouette so a projector doesn't light them.
+- In Projection, press **C** to calibrate: drag the 4 corners onto the stage, then adjust offset and scale.
+- **F** mirror, **T** latency readout.
+
 ## If something goes wrong
 
 - **Mic fails or the room is noisy:** type the cue in the box and press Enter. Same pipeline,
