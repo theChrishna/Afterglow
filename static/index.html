@@ -257,7 +257,6 @@
       <div class="row"><button class="btn" id="presetReel" type="button">Reel look</button><button class="btn" id="presetClassic" type="button">Classic</button></div>
       <label>Background <select id="roomSel" aria-label="Background"><option value="1">Violet room</option><option value="0">Moods and backdrops</option></select></label>
       <label>Echo <select id="echoSel" aria-label="Echo style"><option value="neon">Neon contour</option><option value="ghost">Ghost (classic)</option></select></label>
-      <label>Row side <select id="sideSel" aria-label="Neon row side"><option value="auto">Auto</option><option value="left">Left</option><option value="right">Right</option></select></label>
       <label data-for="projection"><input type="checkbox" id="optLight"> Light on performer (Projection)</label>
       <h3>Lyrics</h3>
       <label>Style <select id="lyricSel" aria-label="Lyric style"><option value="hand">Handwritten</option><option value="kinetic">Kinetic</option></select></label>
@@ -1014,9 +1013,9 @@ function runSegmenter(v, now) {
     echo.fw = w; echo.fh = h;
     echo.frameBox = x2 >= 0 ? [x1, y1, x2 + 1, y2 + 1] : null;
     if (x2 >= 0) {
-      let sx2 = 0, n = 0; const yy = Math.min(h - 1, y1 + 4);
-      for (let x = x1; x <= x2; x++) if ((px[yy * w + x] >>> 24) > 128) { sx2 += x; n++; }
-      echo.headPos = [n ? sx2 / n : (x1 + x2) / 2, y1];
+      const yy = Math.min(h - 1, y1 + 4);
+      const hx = longestRun(x1, x2, x => (px[yy * w + x] >>> 24) > 128);
+      echo.headPos = [hx ?? (x1 + x2) / 2, y1];
     }
     echo.convMs = performance.now() - tc;
   });
@@ -1067,14 +1066,22 @@ function gpuMask(m, now) {
       for (let i = 0, y = 0; y < 27; y++) for (let x = 0; x < 48; x++, i += 4) if (d[i + 3] > 128) {
         if (x < x1) x1 = x; if (x > x2) x2 = x; if (y < y1) y1 = y; if (y > y2) y2 = y; }
       echo.frameBox = x2 >= 0 ? [x1 * w / 48, y1 * h / 27, (x2 + 1) * w / 48, (y2 + 1) * h / 27] : null;
-      if (x2 >= 0) {     // head: mean x of the top two occupied rows
-        let sx2 = 0, n = 0;
-        for (let y = y1; y <= Math.min(26, y1 + 1); y++) for (let x = 0; x < 48; x++) if (d[(y * 48 + x) * 4 + 3] > 128) { sx2 += x; n++; }
-        echo.headPos = [(sx2 / n + 0.5) * w / 48, y1 * h / 27];
+      if (x2 >= 0) {     // head: the topmost person's head (longest run in the top occupied row), not a mean across people
+        const yy = Math.min(26, y1 + 1);
+        const hx = longestRun(0, 47, x => d[(yy * 48 + x) * 4 + 3] > 128) ?? longestRun(0, 47, x => d[(y1 * 48 + x) * 4 + 3] > 128);
+        echo.headPos = [(hx + 0.5) * w / 48, y1 * h / 27];
       }
     }
     echo.gpu = true; return true;
   } catch (err) { console.warn("GPU mask path unavailable, using CPU buffers", err); echo.gpu = false; return false; }
+}
+function longestRun(a, b, on) {     // centre of the longest run of "on" cells in [a, b], or null
+  let best = 0, bestC = null, start = -1;
+  for (let x = a; x <= b + 1; x++) {
+    if (x <= b && on(x)) { if (start < 0) start = x; }
+    else if (start >= 0) { if (x - start > best) { best = x - start; bestC = (start + x - 1) / 2; } start = -1; }
+  }
+  return bestC;
 }
 function pastMask(now, delayS) {      // newest ring slot at least delayS old
   const want = now - delayS * 1000;
@@ -1397,17 +1404,18 @@ function wireModes() {
 
 // ---------------------------------------------------------------- Neon contour: outline + pose-history row
 // Outline = mask minus its erosion (8 offset draws with destination-in), at full mask resolution.
-// Every 130 ms the outline, the subject's box and head x go into a preallocated ring. 6 copies are
-// drawn in a tight row behind the performer, each from k*130 ms ago, aligned by head position so the
-// silhouettes line up and the motion reads as a travelling pose history.
-const NEON_N = 6, NEON_STEP_MS = 130;
-const NEON_GAP = 0.10, NEON_STEP = 0.05;       // × the subject's (smoothed) height: performer → first copy, copy → copy
+// Motion trail: every 110 ms the outline goes into a preallocated ring. Past outlines are drawn where
+// they actually were, then everything inside the CURRENT (slightly grown) silhouette is cut away. So a
+// still person shows only their live outline, a moving person leaves copies behind along their path,
+// and every person in frame gets their own trail.
+const NEON_N = 7, NEON_STEP_MS = 110;
 const NEON_OFFS = [[1.5, 0], [-1.5, 0], [0, 1.5], [0, -1.5], [1.1, 1.1], [-1.1, 1.1], [1.1, -1.1], [-1.1, -1.1]];
-const neon = { w: 0, h: 0, ring: [], head: -1, lastCap: 0, ax: null, bh: null, dir: 1 };
+const NEON_GROW = [[0, 0], [3, 0], [-3, 0], [0, 3], [0, -3]];   // ~3 px: hides segmentation jitter on a still body
+const neon = { w: 0, h: 0, ring: [], head: -1, lastCap: 0 };
 function neonEnsure(w, h) {
   if (neon.w === w && neon.h === h) return;
-  Object.assign(neon, { w, h, m: canvas2(w, h), er: canvas2(w, h), out: canvas2(w, h), head: -1, ax: null, bh: null,
-    ring: Array.from({ length: NEON_N + 1 }, () => ({ c: canvas2(w, h), box: null, hx: 0, t: 0 })) });
+  Object.assign(neon, { w, h, m: canvas2(w, h), er: canvas2(w, h), out: canvas2(w, h), acc: canvas2(w, h), head: -1,
+    ring: Array.from({ length: NEON_N }, () => ({ c: canvas2(w, h), t: 0 })) });
   const g = perf.scratch.getContext("2d").createLinearGradient(0, 0, 0, h);
   g.addColorStop(0, "#ff8a3d"); g.addColorStop(1, "#ffd166"); neon.grad = g;
 }
@@ -1420,53 +1428,40 @@ function neonOutline() {
   out.globalCompositeOperation = "copy"; out.drawImage(neon.m, 0, 0);
   out.globalCompositeOperation = "destination-out"; out.drawImage(neon.er, 0, 0);
 }
-function neonPaint(ctx, src, sx, sy, sw, sh, dx, dy, dw, dh, alpha, glow) {
-  if (sw < 1 || sh < 1) return;
+function neonPaint(ctx, src, dx, dy, dw, dh, alpha, glow) {
   ctx.globalAlpha = alpha; ctx.shadowColor = "rgba(255,61,154,.95)"; ctx.shadowBlur = glow ? 12 : 0;
-  ctx.drawImage(tinted(src, "#ff3d9a"), sx, sy, sw, sh, dx, dy, dw, dh);          // hot pink outer
+  ctx.drawImage(tinted(src, "#ff3d9a"), dx, dy, dw, dh);          // hot pink outer
   ctx.shadowBlur = 0; ctx.globalAlpha = alpha * 0.8;
-  ctx.drawImage(tinted(src, neon.grad), sx, sy, sw, sh, dx + dw * 0.004, dy + dh * 0.004, dw * 0.992, dh * 0.992);   // orange → yellow inner highlight
+  ctx.drawImage(tinted(src, neon.grad), dx + dw * 0.004, dy + dh * 0.004, dw * 0.992, dh * 0.992);   // orange → yellow inner highlight
 }
 function drawNeon(ctx, now, dt, s, ox, oy) {
   const t0 = performance.now();
   neonEnsure(echo.fw, echo.fh);
   neonOutline();
-  const fb = echo.frameBox, hx = echo.headPos ? echo.headPos[0] : fb ? (fb[0] + fb[2]) / 2 : 0;
-  if (fb && now - neon.lastCap >= NEON_STEP_MS) {
+  if (now - neon.lastCap >= NEON_STEP_MS) {
     neon.lastCap = now - neon.lastCap < NEON_STEP_MS * 2 ? neon.lastCap + NEON_STEP_MS : now;
-    neon.head = (neon.head + 1) % neon.ring.length;
+    neon.head = (neon.head + 1) % NEON_N;
     const r = neon.ring[neon.head], rc = r.c.getContext("2d");
-    rc.globalCompositeOperation = "copy"; rc.drawImage(neon.out, 0, 0); r.box = fb.slice(); r.hx = hx; r.t = now;
+    rc.globalCompositeOperation = "copy"; rc.drawImage(neon.out, 0, 0); r.t = now;
   }
+  // 1) past outlines at their real positions, oldest (dimmest) first, into one frame-sized layer
+  const acc = neon.acc.getContext("2d"), W = neon.w, H = neon.h;
+  acc.globalCompositeOperation = "source-over"; acc.clearRect(0, 0, W, H);
+  acc.globalCompositeOperation = "lighter";
+  for (let k = NEON_N - 1; k >= 1; k--) {
+    const r = neon.ring[(neon.head - k + NEON_N * 2) % NEON_N];
+    if (!r.t || now - r.t > NEON_STEP_MS * (NEON_N + 2)) continue;
+    neonPaint(acc, r.c, 0, 0, W, H, 0.9 * (1 - k / (NEON_N + 0.5)), false);
+  }
+  // 2) cut away everything inside where the people are now: trails only appear where someone moved from
+  acc.globalCompositeOperation = "destination-out"; acc.globalAlpha = 1; acc.shadowBlur = 0;
+  for (const [dx, dy] of NEON_GROW) acc.drawImage(neon.m, dx, dy);
+  // 3) composite: trail with a soft glow, then the live outline (zero delay) on top
   ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = "high";
   ctx.globalCompositeOperation = "lighter";
-  neonPaint(ctx, neon.out, 0, 0, neon.w, neon.h, ox, oy, neon.w * s, neon.h * s, 0.95, true);   // current outline, zero delay
-  if (fb) {
-    const [x1, y1, x2, y2] = fb, fw = echo.fw;
-    if (look.side === "auto") {           // trail behind, on the freer side, with hysteresis so it doesn't flip-flop
-      const right = fw - x2, left = x1;
-      if (neon.dir > 0 && left > right * 1.4) neon.dir = -1; else if (neon.dir < 0 && right > left * 1.4) neon.dir = 1;
-    } else neon.dir = (look.side === "right") !== perf.mirror ? 1 : -1;   // explicit side is in screen terms
-    // Height is steadier than width (arms), so spacing scales with it; both anchors ease smoothly.
-    const ease = tau => 1 - Math.exp(-dt / tau);
-    neon.bh = neon.bh === null ? y2 - y1 : neon.bh + (y2 - y1 - neon.bh) * ease(0.5);
-    neon.ax = neon.ax === null ? hx : neon.ax + (hx - neon.ax) * ease(0.12);
-    const gap = neon.bh * NEON_GAP, step = Math.max(4, neon.bh * NEON_STEP), R = neon.ring.length;
-    let floorY = 0, minX = Infinity, maxX = -Infinity;
-    for (let k = NEON_N; k >= 1; k--) {   // oldest first, newest (nearest the performer) on top
-      const r = neon.ring[(neon.head - (k - 1) + R * 2) % R];
-      if (!r.t || !r.box || now - r.t > NEON_STEP_MS * (NEON_N + 3)) continue;
-      const [bx1, by1, bx2, by2] = r.box, cw = bx2 - bx1, ch = by2 - by1;
-      const left = neon.ax + neon.dir * (gap + (k - 1) * step) - (r.hx - bx1);   // this copy's head lands on its slot
-      neonPaint(ctx, r.c, bx1, by1, cw, ch, ox + left * s, oy + by1 * s, cw * s, ch * s, 0.85 * (1 - k / (NEON_N + 2.5)), k <= 2);
-      floorY = Math.max(floorY, by2); minX = Math.min(minX, left); maxX = Math.max(maxX, left + cw);
-    }
-    if (maxX > minX) {                    // thin floor baseline under the row
-      const y = oy + Math.min(floorY, echo.fh - 2) * s;
-      ctx.globalAlpha = 0.7; ctx.strokeStyle = "#ff3d9a"; ctx.lineWidth = 2; ctx.shadowColor = "rgba(255,61,154,.9)"; ctx.shadowBlur = 8;
-      ctx.beginPath(); ctx.moveTo(ox + minX * s, y); ctx.lineTo(ox + maxX * s, y); ctx.stroke();
-    }
-  }
+  ctx.globalAlpha = 1; ctx.shadowColor = "rgba(255,61,154,.9)"; ctx.shadowBlur = 10;
+  ctx.drawImage(neon.acc, ox, oy, W * s, H * s);
+  neonPaint(ctx, neon.out, ox, oy, W * s, H * s, 0.95, true);
   ctx.globalCompositeOperation = "source-over"; ctx.globalAlpha = 1; ctx.shadowBlur = 0;
   echo.neonMs = echo.neonMs ? echo.neonMs * 0.9 + (performance.now() - t0) * 0.1 : performance.now() - t0;
 }
@@ -1564,7 +1559,7 @@ function lookChanged() {
   const reel = look.preset === "reel";
   $("#lookBtn").textContent = reel ? "Reel" : "Classic";
   $("#lookBtn").setAttribute("aria-label", reel ? "Look: Reel. Switch to Classic" : "Look: Classic. Switch to Reel");
-  $("#roomSel").value = look.room ? "1" : "0"; $("#echoSel").value = look.echo; $("#sideSel").value = look.side;
+  $("#roomSel").value = look.room ? "1" : "0"; $("#echoSel").value = look.echo;
   $("#lyricSel").value = look.lyrics; $("#optFollow").checked = look.follow; $("#optHud").checked = look.hud; $("#optLight").checked = look.lightOn;
   saveLook();
 }
@@ -1581,7 +1576,6 @@ function wireLook() {
   const set = (k, v) => { look[k] = v; lookChanged(); };
   $("#roomSel").addEventListener("change", e => set("room", e.target.value === "1"));
   $("#echoSel").addEventListener("change", e => set("echo", e.target.value));
-  $("#sideSel").addEventListener("change", e => set("side", e.target.value));
   $("#lyricSel").addEventListener("change", e => { set("lyrics", e.target.value); if (ly.line) endLine(); });
   $("#optFollow").addEventListener("change", e => set("follow", e.target.checked));
   $("#optHud").addEventListener("change", e => set("hud", e.target.checked));
