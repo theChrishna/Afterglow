@@ -35,7 +35,7 @@ scenes, no API calls and no key needed. Tests: `.venv/bin/python -m pytest`.
 
 | Preset | Background | Echo | Lyrics |
 |---|---|---|---|
-| **Reel** (default) | *Violet room*: lit wall gradient, brighter ceiling band, pink floor strip, slow breathing. Cues tint it. | *Neon contour*: a live outline (no added delay) plus a motion trail. Past outlines from the last ~0.7 s (every 110 ms) are drawn where each person actually was, and anything inside where they are now is cut away. So a still person has no trail, a moving person leaves copies along their path, and each person in frame gets their own trail. Pink outer, orange/yellow inner, additive glow, older copies dimmer. | *Handwritten*: up to 2 lines, revealed letter by letter, one line above the performer's head (with several people in frame, the highest head) with an eased follow. Each phrase uses the next font in a fixed order (Caveat, Gaegu, Shadows Into Light, Reenie Beanie, Fraunces). Optional HUD details: cursor box, x/y readout, hairline leader lines. |
+| **Reel** (default) | *Violet room*: lit wall gradient, brighter ceiling band, pink floor strip, slow breathing. Cues tint it. | *Neon contour*: **no outline is ever drawn on the performer.** Only a delayed trail: copies from older snapshots (every 110 ms, last ~0.8 s), placed to one side so the newest starts at least 0.15 x the subject's width from the live edge and none overlaps the body. **Trail source** (More > Look): *Motion only* (default) outlines just what an old snapshot has that the current mask doesn't (old minus now), so only parts that moved leave contours (an arm wave leaves arm-shaped contours, a still body leaves almost nothing) and the trail fades in and out with a motion measure; *Full pose history* offsets the whole outline of each old snapshot. The row sits on the side the subject is moving away from (the freer side when still). Pink outer, orange/yellow inner, additive glow, dimmer with age, thin floor baseline. 
 | **Classic** | Moods with Muse Image backdrops | Ghost (difference-blend silhouette, trail, delayed copies) | (same as Reel: the lyric style is its own setting) |
 
 - **Handwritten is the default lyric style in every scene**, Reel or Classic. It is saved
@@ -134,6 +134,7 @@ Measured with the on-screen readout (**T**) in the Chromium-based in-app browser
 | Camera request | 640×360 | 640×360, 60 fps ideal (24 min) |
 | Draw loop in Projection (grow 8, feather 3) | n/a | 16.7 ms (holds 60 Hz) |
 | Draw loop with Neon contour (Reel look) | n/a | 16.7 ms (holds 60 Hz); neon drawing ~0.4–0.5 ms on the main thread |
+| Neon draw cost, Motion-only trail (fake camera, throttled pane) | live outline, ~0.2–0.3 ms | ~0.35 ms with no motion, ~5–7 ms while moving (6 copies of half-res diffs). Frame rate in the pane could not be compared: it was throttled to a few fps in both runs. Not yet optimised. |
 
 What changed: segmentation is driven by `requestVideoFrameCallback` (falls back to
 `requestAnimationFrame`); MediaPipe runs on its GPU delegate with its own WebGL canvas, and its mask
