@@ -8,6 +8,7 @@ from typing import Awaitable, Callable, Protocol
 from ..scene import Scene
 
 PartialCallback = Callable[[str], Awaitable[None]]
+EventCallback = Callable[[dict], Awaitable[None]]
 
 
 class BackendError(Exception):

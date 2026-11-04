@@ -40,6 +40,7 @@ class Limits:
         self._spent = 0.0
         self._calls: dict[str, int] = {}
         self._perform_start: dict[str, float] = {}
+        self._used_s: dict[tuple[str, str], float] = {}
 
     @staticmethod
     def _today() -> str:
@@ -48,7 +49,7 @@ class Limits:
     def _roll(self) -> None:
         d = self._today()
         if d != self._day:
-            self._day, self._spent, self._calls, self._perform_start = d, 0.0, {}, {}
+            self._day, self._spent, self._calls, self._perform_start, self._used_s = d, 0.0, {}, {}, {}
 
     def allow(self, ip: str, kind: str) -> bool:
         with self._lock:
@@ -81,6 +82,16 @@ class Limits:
         with self._lock:
             self._roll()
             self._perform_start.setdefault(ip, time.monotonic())
+
+    def use_seconds(self, ip: str, kind: str, seconds: float) -> None:
+        with self._lock:
+            self._roll()
+            self._used_s[(ip, kind)] = self._used_s.get((ip, kind), 0.0) + seconds
+
+    def seconds_left(self, ip: str, kind: str, allowance: float) -> float:
+        with self._lock:
+            self._roll()
+            return max(0.0, allowance - self._used_s.get((ip, kind), 0.0))
 
     def status(self) -> dict:
         with self._lock:

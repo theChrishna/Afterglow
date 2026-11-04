@@ -4,6 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Afterglow</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Playfair+Display:ital,wght@1,600&family=Space+Grotesk:wght@500;700&family=Space+Mono:wght@700&display=swap" rel="stylesheet">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='12' fill='%236a2cff'/%3E%3Ccircle cx='16' cy='16' r='6' fill='%2333d1ff'/%3E%3C/svg%3E">
 <style>
   :root { --c0: #05010f; --c1: #6a2cff; --c2: #33d1ff; --ui: rgba(255,255,255,.88); --ui-dim: rgba(255,255,255,.55); }
@@ -65,7 +68,41 @@
     font-variant-numeric: tabular-nums; white-space: nowrap; }
   #perform[aria-pressed="true"] { background: rgba(255,255,255,.9); color: #000; border-color: transparent; }
   #perform:disabled { opacity: .45; cursor: default; }
-  #ghost { mix-blend-mode: screen; }
+  /* Difference keeps the echo visible on dark and bright scenes alike (an inverted, glowing ghost). */
+  #ghost { mix-blend-mode: difference; }
+  #lyricsBtn { flex: 0 0 auto; border: 1px solid rgba(255,255,255,.22); border-radius: 999px; padding: 13px 16px; font: inherit;
+    font-size: 14px; color: #fff; background: rgba(0,0,0,.4); backdrop-filter: blur(10px); cursor: pointer; white-space: nowrap; }
+  #lyricsBtn[aria-pressed="true"] { background: rgba(255,255,255,.9); color: #000; border-color: transparent; }
+
+  /* Lyrics: kinetic type, positioned by JS (follows the performer or wherever it was dragged). */
+  #lyrics { position: absolute; left: 0; top: 0; z-index: 3; width: max-content; max-width: min(72vw, 940px);
+    cursor: grab; touch-action: none; user-select: none; -webkit-user-select: none; translate: -50% -50%; text-align: center; }
+  #lyrics[data-anchor="left"] { translate: 0 -50%; text-align: left; }
+  #lyrics[data-anchor="right"] { translate: -100% -50%; text-align: right; }
+  #lyrics.dragging { cursor: grabbing; }
+  .ly-line { font: 700 clamp(28px, 5.4vw, 76px)/1.06 "Space Grotesk", system-ui, sans-serif; color: #fff; margin: .1em 0;
+    text-shadow: 0 4px 28px rgba(0,0,0,.6); transition: opacity 1.5s ease, transform 1.5s ease, filter 1.5s ease; }
+  .ly-line.past { position: absolute; left: 0; right: 0; bottom: 100%; opacity: 0; transform: translateY(-.4em) scale(.94); filter: blur(6px); }
+  .ly-line .w { display: inline-block; }
+  .fx-rise { font-family: "Playfair Display", Georgia, serif; font-style: italic; font-weight: 600; }
+  .fx-rise .w { animation: ly-rise .75s cubic-bezier(.2,.8,.2,1) both; }
+  .fx-pop .w { color: var(--c2); text-shadow: 0 0 26px var(--c2), 0 4px 24px rgba(0,0,0,.5); animation: ly-pop .45s cubic-bezier(.2,1.7,.4,1) both; }
+  .fx-neon { text-shadow: 0 0 6px #fff, 0 0 18px var(--c2), 0 0 42px var(--c2), 0 0 80px var(--c1); }
+  .fx-neon .w { animation: ly-flicker .9s steps(1, end) both; }
+  .fx-stamp { font-family: "Bebas Neue", Impact, sans-serif; font-weight: 400; font-size: clamp(44px, 9vw, 132px); line-height: .95;
+    text-transform: uppercase; letter-spacing: .02em; }
+  .fx-stamp .w { animation: ly-stamp .32s cubic-bezier(.3,1.5,.5,1) both; }
+  .fx-wave .w { color: var(--c2); animation: ly-in .4s ease both, ly-bob 2.4s ease-in-out infinite; animation-delay: 0s, calc(var(--i) * .13s); }
+  .fx-type { font-family: "Space Mono", ui-monospace, monospace; font-size: clamp(24px, 4.2vw, 60px); }
+  .fx-type .w { animation: ly-type .32s steps(8, end) both; }
+  @keyframes ly-rise { from { opacity: 0; transform: translateY(.6em); filter: blur(10px); } }
+  @keyframes ly-pop { from { opacity: 0; transform: scale(1.9); } }
+  @keyframes ly-flicker { 0% { opacity: 0; } 12% { opacity: 1; } 18% { opacity: .15; } 26% { opacity: 1; } 34% { opacity: .4; } 42%, 100% { opacity: 1; } }
+  @keyframes ly-stamp { from { opacity: 0; transform: scale(2.4) rotate(-6deg); } }
+  @keyframes ly-in { from { opacity: 0; transform: translateY(.3em); } }
+  @keyframes ly-bob { 50% { transform: translateY(-.14em); } }
+  @keyframes ly-type { from { clip-path: inset(0 100% 0 0); } to { clip-path: inset(0 0 0 0); } }
+  @media (prefers-reduced-motion: reduce) { .ly-line .w { animation: none !important; } }
   #cam { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
   #cue { flex: 1 1 auto; min-width: 0; border: 1px solid rgba(255,255,255,.18); border-radius: 999px; padding: 13px 16px;
     font: inherit; color: #fff; background: rgba(0,0,0,.4); backdrop-filter: blur(10px); outline: none; }
@@ -81,7 +118,8 @@
   #start small { display: block; margin-top: 14px; color: var(--ui-dim); }
   .kbd { display: inline-block; padding: 0 6px; border: 1px solid rgba(255,255,255,.35); border-radius: 4px; font-size: 12px; }
   @media (max-width: 560px) { #mood { max-width: 55%; } #timing { display: none; }
-    #perform { padding: 13px 12px; } #caption { bottom: calc(110px + env(safe-area-inset-bottom)); } }
+    #perform, #lyricsBtn { padding: 13px 12px; }
+    #controls { flex-wrap: wrap; } #cue { flex-basis: 100%; } #caption { bottom: calc(110px + env(safe-area-inset-bottom)); } }
 </style>
 </head>
 <body>
@@ -90,13 +128,15 @@
   <canvas id="fx"></canvas>
   <canvas id="ghost"></canvas>
   <video id="cam" playsinline muted></video>
+  <div id="lyrics" data-anchor="center" title="Drag to place · double-click to follow you"></div>
   <div id="tint"></div>
   <div id="hud">
     <div class="brand">AFTERGLOW</div>
     <div id="status" data-state="offline"><span class="dot"></span><span class="text">connecting…</span><span class="mode"></span></div>
     <div id="caption"></div>
     <div id="controls">
-      <button id="ptt" aria-label="Hold to speak a cue">Hold to speak</button>
+      <button id="ptt" aria-label="Hold to speak a command">Hold for command</button>
+      <button id="lyricsBtn" class="toggle" aria-pressed="false" title="Show everything you say or sing as lyrics (L)">Lyrics</button>
       <button id="perform" class="pill" aria-pressed="false" title="Ghost echo of your silhouette (camera, 3 min per visitor)">Perform</button>
       <input id="cue" type="text" maxlength="300" placeholder="…or type a cue and press Enter" autocomplete="off">
     </div>
@@ -109,7 +149,7 @@
       <h1>AFTERGLOW</h1>
       <p>Speak a cue and the stage answers: light and motion change at once, and a new backdrop drifts in a few seconds later.</p>
       <button id="go">Enter the stage</button>
-      <small>Hold <span class="kbd">Space</span> or the button to speak · <span class="kbd">P</span> Perform (camera ghost echo) · <span class="kbd">H</span> hides the controls</small>
+      <small>Hold <span class="kbd">Space</span> for a command · <span class="kbd">L</span> lyrics (say or sing anything) · <span class="kbd">E</span> lyric effect · <span class="kbd">P</span> perform (camera echo) · <span class="kbd">H</span> hide controls</small>
     </div>
   </div>
 </div>
@@ -315,7 +355,9 @@ function frame(now) {
     gl.uniform3fv(u.u_c0, cur.c[0]); gl.uniform3fv(u.u_c1, cur.c[1]); gl.uniform3fv(u.u_c2, cur.c[2]);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
   }
-  drawGhosts(now);
+  segmentLive(now);
+  drawGhosts(now, dt);
+  placeLyrics(dt);
   requestAnimationFrame(frame);
 }
 
@@ -391,13 +433,14 @@ function connect() {
   ws = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws/stage`);
   ws.binaryType = "arraybuffer";
   ws.onopen = () => { wsDelay = 1000; setStatus("ready"); };
-  ws.onclose = () => { setStatus("offline"); setTimeout(connect, wsDelay); wsDelay = Math.min(wsDelay * 2, 10000); };
+  ws.onclose = () => { if (ly.on || ly.pending) setLyricsState(false); setStatus("offline"); setTimeout(connect, wsDelay); wsDelay = Math.min(wsDelay * 2, 10000); };
   ws.onmessage = e => {
     let m; try { m = JSON.parse(e.data); } catch { return; }
     if (m.type === "hello") {
       $("#status .mode").textContent = m.mode;
       stage.mode = m.mode;
       applyScene(m.scene); setBackdrop(m.backdrop); setProvenance("standby", "bank");
+      ly.sceneStyle = m.scene.shader.style;
     } else if (m.type === "status") {
       setStatus(m.state, m.detail);
     } else if (m.type === "transcript") {
@@ -405,10 +448,16 @@ function connect() {
       setCaption(m.text, !m.final);
     } else if (m.type === "scene") {
       applyScene(m.scene); setBackdrop(m.backdrop); setProvenance(m.source, "bank");
+      ly.sceneStyle = m.scene.shader.style;
       showTiming(performance.now(), m.source);
       if (m.source !== "instant") timing.release = timing.final = 0;
     } else if (m.type === "backdrop") {
       setBackdrop(m.url); setProvenance(null, "generated");
+    } else if (m.type === "lyric") {
+      onLyric(m.text, m.done);
+    } else if (m.type === "lyrics_state") {
+      setLyricsState(!!m.on);
+      if (!m.on && m.detail) setStatus(m.reason === "error" ? "error" : "limited", m.detail);
     }
   };
 }
@@ -422,7 +471,7 @@ class Pcm24k extends AudioWorkletProcessor {
     this.ratio = sampleRate / 24000; this.pos = 0; this.prev = 0; this.on = false;
     this.buf = new Int16Array(1920); this.n = 0;  // 80 ms chunks
     this.port.onmessage = e => {
-      if (e.data === "on") { this.on = true; this.pos = 0; this.n = 0; }
+      if (e.data === "on") { if (!this.on) { this.on = true; this.pos = 0; this.n = 0; } }
       else if (e.data === "off") { this.on = false; this.flush(); this.port.postMessage("done"); }
     };
   }
@@ -455,7 +504,22 @@ class Pcm24k extends AudioWorkletProcessor {
 }
 registerProcessor("pcm24k", Pcm24k);`;
 
-const mic = { ctx: null, node: null, ready: false, talking: false, releasing: false };
+// One mic, two destinations. Holding the key sends audio on the command channel (0x01).
+// With Lyrics on, the mic also streams continuously on the lyrics channel (0x02); while the
+// key is held that channel gets silence instead, so commands never show up as lyrics.
+const CH_COMMAND = 1, CH_LYRICS = 2;
+const mic = { ctx: null, node: null, ready: false, running: false, talking: false, releasing: false,
+  endOnDone: false, lyrics: false };
+function sendTagged(tag, buf) {
+  const out = new Uint8Array(buf.byteLength + 1);
+  out[0] = tag; out.set(new Uint8Array(buf), 1);
+  wsSend(out.buffer);
+}
+function micRun() {
+  const want = mic.talking || mic.releasing || mic.lyrics;
+  if (want && !mic.running) { mic.node.port.postMessage("on"); mic.running = true; }
+  else if (!want && mic.running) { mic.node.port.postMessage("off"); mic.running = false; }
+}
 async function initMic() {
   if (mic.ready) return true;
   try {
@@ -466,8 +530,14 @@ async function initMic() {
     const mute = ctx.createGain(); mute.gain.value = 0;
     ctx.createMediaStreamSource(stream).connect(node).connect(mute).connect(ctx.destination);
     node.port.onmessage = e => {
-      if (e.data === "done") { wsSend(JSON.stringify({ type: "ptt_end" })); mic.releasing = false; }
-      else if (e.data instanceof ArrayBuffer) wsSend(e.data);
+      if (e.data === "done") {
+        if (mic.endOnDone) { wsSend(JSON.stringify({ type: "ptt_end" })); mic.endOnDone = false; mic.releasing = false; }
+        return;
+      }
+      if (!(e.data instanceof ArrayBuffer)) return;
+      const command = mic.talking || mic.releasing;
+      if (command) sendTagged(CH_COMMAND, e.data);
+      if (mic.lyrics) sendTagged(CH_LYRICS, command ? new ArrayBuffer(e.data.byteLength) : e.data);
     };
     Object.assign(mic, { ctx, node, ready: true });
     return true;
@@ -482,44 +552,171 @@ async function pttDown() {
   if (!mic.ready && !(await initMic())) return;
   if (mic.ctx.state === "suspended") await mic.ctx.resume();
   mic.talking = true;
-  $("#ptt").classList.add("active"); $("#ptt").textContent = "Listening…";
+  $("#ptt").classList.add("active"); $("#ptt").textContent = "Command…";
   wsSend(JSON.stringify({ type: "ptt_start" }));
-  mic.node.port.postMessage("on");
+  micRun();
 }
 function pttUp() {
   if (!mic.talking) return;
   mic.talking = false; mic.releasing = true;
-  $("#ptt").classList.remove("active"); $("#ptt").textContent = "Hold to speak";
+  $("#ptt").classList.remove("active"); $("#ptt").textContent = "Hold for command";
   timing.release = performance.now(); timing.final = 0;
-  setTimeout(() => mic.node.port.postMessage("off"), 200);  // short tail so the last word isn't clipped
+  setTimeout(() => {   // short tail so the last word isn't clipped
+    if (mic.lyrics) {  // worklet keeps running for lyrics: just close the command
+      mic.releasing = false; wsSend(JSON.stringify({ type: "ptt_end" }));
+    } else {           // flush the worklet first, then close the command on "done"
+      mic.endOnDone = true; mic.running = false; mic.node.port.postMessage("off");
+    }
+  }, 200);
 }
 
-// ---------------------------------------------------------------- Perform mode: webcam → SAM 3.1 → ghost echo
-// A frame goes to the server every ~3.5 s; the mask that comes back is seconds old, so it is
-// drawn as a deliberately delayed, rising, fading echo, never as live tracking.
-const FRAME_W = 640, FRAME_H = 360, CAPTURE_MS = 3500, GHOST_MAX = 6;
-// Meta's official SAM parser decodes the compact mask in the browser (pure-Python decoding is
-// seconds on a small server CPU). If the CDN can't be reached, the server decodes to PNG instead.
+// ---------------------------------------------------------------- Lyrics: live words as kinetic type
+const EFFECTS = ["rise", "pop", "neon", "stamp", "wave", "type"];
+const STYLE_EFFECT = { grid: "neon", rain: "type", nebula: "rise", smoke: "rise", aurora: "wave", embers: "stamp" };
+const ly = { on: false, pending: false, line: null, lastAt: 0, effect: "auto", sceneStyle: "nebula",
+  mode: "auto", x: 0.5, y: 0.42, cx: null, cy: null };
+try { const saved = JSON.parse(localStorage.getItem("afterglow.lyrics") || "null");
+  if (saved && saved.mode === "free") Object.assign(ly, { mode: "free", x: saved.x, y: saved.y }); } catch {}
+const effectNow = () => ly.effect === "auto" ? (STYLE_EFFECT[ly.sceneStyle] || "rise") : ly.effect;
+
+function lyricsButton() {
+  const b = $("#lyricsBtn");
+  b.setAttribute("aria-pressed", ly.on ? "true" : "false");
+  b.textContent = ly.pending ? "Lyrics…" : "Lyrics";
+}
+async function lyricsOn() {
+  if (ly.on || ly.pending) return;
+  if (!mic.ready && !(await initMic())) return;
+  if (mic.ctx.state === "suspended") await mic.ctx.resume();
+  ly.pending = true; lyricsButton();
+  wsSend(JSON.stringify({ type: "lyrics_start" }));
+}
+function lyricsOff() {
+  if (!ly.on && !ly.pending) return;
+  wsSend(JSON.stringify({ type: "lyrics_stop" }));
+  setLyricsState(false);
+}
+function setLyricsState(on) {
+  ly.on = on; ly.pending = false; mic.lyrics = on;
+  if (mic.ready) micRun();
+  if (!on && ly.line) endLine();
+  lyricsButton();
+}
+function onLyric(text, done) {
+  if (!ly.on) return;
+  const words = text.split(/\s+/).filter(Boolean);
+  if (!words.length) return;
+  if (!ly.line) {
+    const box = $("#lyrics");
+    for (const old of box.querySelectorAll(".ly-line:not(.past)")) old.classList.add("past");
+    while (box.children.length > 3) box.firstElementChild.remove();
+    ly.line = document.createElement("div");
+    ly.line.className = `ly-line fx-${effectNow()}`;
+    box.appendChild(ly.line);
+  }
+  const spans = ly.line.children;
+  words.forEach((w, i) => {
+    if (i < spans.length) { if (spans[i].textContent !== w) spans[i].textContent = w; return; }  // ASR revision: no re-animate
+    const sp = document.createElement("span");
+    sp.className = "w"; sp.textContent = w; sp.style.setProperty("--i", i);
+    ly.line.append(sp, " ");   // real spaces, so the line reads and copies as text
+  });
+  while (spans.length > words.length) ly.line.lastElementChild.remove();
+  ly.lastAt = performance.now();
+  if (done) endLine();
+}
+function endLine() {
+  const line = ly.line; ly.line = null;
+  if (!line) return;
+  line.classList.add("done");
+  setTimeout(() => { line.classList.add("past"); setTimeout(() => line.remove(), 1800); }, 3200);
+}
+setInterval(() => { if (ly.line && performance.now() - ly.lastAt > 4000) endLine(); }, 500);  // stalled turn
+
+function placeLyrics(dt) {
+  const box = $("#lyrics"), W = innerWidth, H = innerHeight;
+  let tx = ly.x * W, ty = ly.y * H, anchor = "center";
+  if (ly.mode === "auto" && echo.box && echo.boxAt > performance.now() - 600) {
+    const [bx1, by1, bx2] = echo.box;           // beside the performer, on the side with more room
+    const right = W - bx2 > bx1;
+    if ((right ? W - bx2 : bx1) > W * 0.28) {
+      tx = right ? Math.min(bx2 + 28, W - 24) : Math.max(bx1 - 28, 24);
+      ty = Math.max(H * 0.16, by1 + (H - by1) * 0.18);
+      anchor = right ? "left" : "right";
+    } else { tx = W / 2; ty = H * 0.2; }        // performer fills the frame: float above them
+  }
+  // Keep the block on screen: limit its width to the room on its side, then clamp its centre.
+  const room = anchor === "left" ? W - tx - 24 : anchor === "right" ? tx - 24 : Math.min(W - 48, 940);
+  box.style.maxWidth = `${Math.max(220, Math.min(room, 940))}px`;
+  const bw = box.offsetWidth, bh = box.offsetHeight;
+  if (anchor === "center") tx = Math.min(Math.max(tx, bw / 2 + 16), W - bw / 2 - 16);
+  ty = Math.min(Math.max(ty, bh / 2 + 56), H - bh / 2 - 110);
+  if (ly.cx === null) { ly.cx = tx; ly.cy = ty; }
+  const k = ly.mode === "free" ? 1 : 1 - Math.exp(-dt / 0.35);
+  ly.cx += (tx - ly.cx) * k; ly.cy += (ty - ly.cy) * k;
+  box.dataset.anchor = anchor;
+  box.style.transform = `translate(${ly.cx.toFixed(1)}px, ${ly.cy.toFixed(1)}px)`;
+}
+function wireLyricsDrag() {
+  const box = $("#lyrics");
+  let drag = null;
+  box.addEventListener("pointerdown", e => {
+    drag = { dx: e.clientX - ly.cx, dy: e.clientY - ly.cy }; box.setPointerCapture(e.pointerId); box.classList.add("dragging");
+  });
+  box.addEventListener("pointermove", e => {
+    if (!drag) return;
+    ly.mode = "free"; ly.x = (e.clientX - drag.dx) / innerWidth; ly.y = (e.clientY - drag.dy) / innerHeight;
+  });
+  const stop = () => {
+    if (!drag) return;
+    drag = null; box.classList.remove("dragging");
+    try { localStorage.setItem("afterglow.lyrics", JSON.stringify({ mode: ly.mode, x: ly.x, y: ly.y })); } catch {}
+  };
+  box.addEventListener("pointerup", stop); box.addEventListener("pointercancel", stop);
+  box.addEventListener("dblclick", () => {   // back to automatic placement
+    Object.assign(ly, { mode: "auto", x: 0.5, y: 0.42 });
+    try { localStorage.removeItem("afterglow.lyrics"); } catch {}
+    setStatus("ready", "Lyrics follow you again.");
+  });
+}
+
+// ---------------------------------------------------------------- Perform: real-time echo (on-device) + SAM 3.1 snapshots
+// The live silhouette comes from MediaPipe's selfie segmenter running in the browser at camera
+// frame rate. Every few seconds SAM 3.1 (Meta Model API) also cuts a crisp snapshot, which is
+// released as a slow "afterglow" drifting away from the performer.
+const FRAME_W = 640, FRAME_H = 360, SNAPSHOT_MS = 6000, GHOST_MAX = 4;
+const MP_BASE = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.1.1";
+const MP_MODEL = "https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_segmenter/float16/latest/selfie_segmenter.tflite";
 const SAM_PARSER_URL = "https://cdn.jsdelivr.net/npm/@meta-sam/parser@0.1.0/dist/index.js";
-let samDecoder = null;
+let samDecoder = null, segmenterPromise = null;
 function loadDecoder() {
   if (!samDecoder) samDecoder = import(SAM_PARSER_URL).then(m => m.decodeMaskToRaster)
     .catch(err => { console.warn("SAM parser unavailable; using server-side PNG masks", err); return null; });
   return samDecoder;
 }
-const perf = { on: false, stream: null, timer: null, inflight: false, left: null, leftAt: 0, ghosts: [], mirror: true,
-  cap: Object.assign(document.createElement("canvas"), { width: FRAME_W, height: FRAME_H }),
-  scratch: document.createElement("canvas") };
+function loadSegmenter() {
+  if (!segmenterPromise) segmenterPromise = (async () => {
+    const { FilesetResolver, ImageSegmenter } = await import(`${MP_BASE}/vision_bundle.mjs`);
+    const files = await FilesetResolver.forVisionTasks(`${MP_BASE}/wasm`);
+    const opts = delegate => ({ baseOptions: { modelAssetPath: MP_MODEL, delegate }, runningMode: "VIDEO",
+      outputCategoryMask: false, outputConfidenceMasks: true });
+    try { return await ImageSegmenter.createFromOptions(files, opts("GPU")); }
+    catch { return await ImageSegmenter.createFromOptions(files, opts("CPU")); }
+  })().catch(err => { console.warn("on-device segmenter unavailable", err); return null; });
+  return segmenterPromise;
+}
+const canvas2 = (w, h) => Object.assign(document.createElement("canvas"), { width: w, height: h });
+const perf = { on: false, stream: null, timer: null, inflight: false, left: null, ghosts: [], mirror: true,
+  cap: canvas2(FRAME_W, FRAME_H), scratch: canvas2(1, 1), snapshots: true };
+const ECHO_DELAYS = [7, 14, 21];             // frames behind (~0.23 / 0.47 / 0.7 s at 30 fps)
+const echo = { seg: null, live: null, trail: null, ring: [], ringAt: 0, lastVideoTime: -1, lastSegAt: 0,
+  fw: 0, fh: 0, box: null, boxAt: 0, fps: 0 };
 
 function perfButton() {
   const b = $("#perform");
   b.setAttribute("aria-pressed", perf.on ? "true" : "false");
-  const left = perf.left === null ? null : Math.max(0, perf.left - (performance.now() - perf.leftAt) / 1000);
-  if (left !== null && left <= 0 && !perf.on) { b.textContent = "Perform used"; b.disabled = true; return; }
-  b.textContent = perf.on && left !== null ? `Perform ${Math.floor(left / 60)}:${String(Math.floor(left % 60)).padStart(2, "0")}` : "Perform";
+  b.textContent = perf.on ? "Perform ●" : "Perform";
 }
-setInterval(() => { if (perf.on) perfButton(); }, 1000);
-
 async function performOn() {
   if (perf.on) return;
   try {
@@ -529,27 +726,73 @@ async function performOn() {
     console.warn("camera unavailable", err);
     setStatus("error", "Camera unavailable."); return;
   }
-  const v = $("#cam"); v.srcObject = perf.stream; await v.play().catch(() => {});
-  perf.decode = await loadDecoder();
+  const v = $("#cam"); v.srcObject = perf.stream;
+  // Some browsers never settle play() for a hidden/odd stream: don't let that hang Perform.
+  await Promise.race([v.play().catch(() => {}), new Promise(r => setTimeout(r, 1500))]);
   perf.on = true; perfButton();
-  captureLoop();
+  setStatus("thinking", "Loading the on-device segmenter…");
+  const [seg, dec] = await Promise.all([loadSegmenter(), loadDecoder()]);
+  echo.seg = seg; perf.decode = dec;
+  if (!perf.on) return;
+  stage.echo = seg ? "live · on-device" : "SAM only (delayed)";
+  setStatus("ready", seg ? "Real-time echo on." : "Real-time echo unavailable here; using SAM snapshots.");
+  setProvenance(null, null);
+  snapshotLoop();
 }
 function performOff() {
   perf.on = false; clearTimeout(perf.timer);
   if (perf.stream) perf.stream.getTracks().forEach(t => t.stop());
-  perf.stream = null; perfButton();   // existing ghosts keep fading out on their own
+  perf.stream = null; echo.box = null; perfButton();
+  stage.echo = null; setProvenance(null, null);
 }
-function captureLoop() {
+
+// Live mask → white-with-alpha canvas, plus the performer's bounding box (for lyric placement).
+function segmentLive(now) {
+  const v = $("#cam");
+  if (!echo.seg || !perf.on || v.readyState < 2 || v.currentTime === echo.lastVideoTime) return;
+  if (now - echo.lastSegAt < 30) return;     // cap at ~33 fps
+  echo.lastVideoTime = v.currentTime;
+  const t0 = performance.now();
+  echo.seg.segmentForVideo(v, now, result => {
+    const m = result.confidenceMasks && result.confidenceMasks[0];
+    if (!m) return;
+    const w = m.width, h = m.height, conf = m.getAsFloat32Array();
+    if (!echo.live || echo.live.width !== w || echo.live.height !== h) {
+      echo.live = canvas2(w, h); echo.trail = canvas2(w, h); echo.ring = [];
+      echo.img = echo.live.getContext("2d").createImageData(w, h);
+    }
+    const d = echo.img.data;
+    let x1 = w, y1 = h, x2 = -1, y2 = -1;
+    for (let i = 0, y = 0; y < h; y++) for (let x = 0; x < w; x++, i++) {
+      const c = conf[i], a = c <= 0.35 ? 0 : c >= 0.65 ? 255 : ((c - 0.35) / 0.3) * 255;
+      const o = i * 4; d[o] = d[o + 1] = d[o + 2] = 255; d[o + 3] = a;
+      if (a > 128) { if (x < x1) x1 = x; if (x > x2) x2 = x; if (y < y1) y1 = y; if (y > y2) y2 = y; }
+    }
+    echo.live.getContext("2d").putImageData(echo.img, 0, 0);
+    echo.fw = w; echo.fh = h;
+    echo.frameBox = x2 >= 0 ? [x1, y1, x2 + 1, y2 + 1] : null;
+    // Ring buffer of past masks at half resolution for the delayed echo copies.
+    const keep = canvas2(Math.ceil(w / 2), Math.ceil(h / 2));
+    keep.getContext("2d").drawImage(echo.live, 0, 0, keep.width, keep.height);
+    echo.ring.push(keep);
+    if (echo.ring.length > ECHO_DELAYS[ECHO_DELAYS.length - 1] + 1) echo.ring.shift();
+  });
+  echo.fps = echo.fps * 0.9 + (1000 / Math.max(1, now - echo.lastSegAt)) * 0.1;
+  echo.lastSegAt = now;
+  echo.segMs = performance.now() - t0;
+}
+
+// SAM 3.1 snapshot every few seconds (Meta Model API); capped per visitor by the server.
+function snapshotLoop() {
   if (!perf.on) return;
-  if (!perf.inflight) sendFrame();
-  perf.timer = setTimeout(captureLoop, CAPTURE_MS);
+  if (perf.snapshots && !perf.inflight) sendSnapshot();
+  perf.timer = setTimeout(snapshotLoop, echo.seg ? SNAPSHOT_MS : 3500);
 }
-async function sendFrame() {
+async function sendSnapshot() {
   const v = $("#cam");
   if (v.readyState < 2 || !v.videoWidth) return;
   perf.inflight = true;
   const tCap = performance.now();
-  // Cover-crop the camera to 16:9 at 640x360 (smaller frames = faster SAM, smaller masks to decode).
   const s = Math.max(FRAME_W / v.videoWidth, FRAME_H / v.videoHeight);
   const sw = FRAME_W / s, sh = FRAME_H / s;
   perf.cap.getContext("2d").drawImage(v, (v.videoWidth - sw) / 2, (v.videoHeight - sh) / 2, sw, sh, 0, 0, FRAME_W, FRAME_H);
@@ -559,18 +802,21 @@ async function sendFrame() {
     if (!perf.decode) headers["X-Mask-Format"] = "png";
     const res = await fetch("/api/silhouette", { method: "POST", headers, body: blob });
     const j = await res.json().catch(() => ({}));
-    if (typeof j.perform_left_s === "number") { perf.left = j.perform_left_s; perf.leftAt = performance.now(); }
+    if (typeof j.perform_left_s === "number") perf.left = j.perform_left_s;
     if (res.ok && j.mask) addGhost(j.mask, tCap);
-    else if (j.error === "perform_time_up" || j.error === "budget") { performOff(); setStatus("limited", j.detail); }
-    else if (!res.ok && j.error !== "too_fast") setStatus("error", j.detail || "Silhouette unavailable.");
+    else if (j.error === "perform_time_up" || j.error === "budget") {
+      perf.snapshots = false;               // the live echo keeps going; only SAM snapshots stop
+      if (!echo.seg) performOff();
+      setStatus("limited", j.detail);
+    }
   } catch {
-    setStatus("error", "Silhouette unavailable; keeping the last echo.");
+    /* a missed snapshot is fine: the live echo carries on */
   } finally {
-    perf.inflight = false; perfButton();
+    perf.inflight = false;
   }
 }
 function maskCanvas(raster, w, h) {
-  const c = Object.assign(document.createElement("canvas"), { width: w, height: h });
+  const c = canvas2(w, h);
   const ctx = c.getContext("2d"), id = ctx.createImageData(w, h), d = id.data;
   for (let i = 0; i < raster.length; i++) { const o = i * 4; d[o] = d[o + 1] = d[o + 2] = 255; d[o + 3] = raster[i] ? 255 : 0; }
   ctx.putImageData(id, 0, 0);
@@ -579,59 +825,82 @@ function maskCanvas(raster, w, h) {
 async function addGhost(res, tCap) {
   let img;
   try {
-    if (res.mask && perf.decode) {
-      const t = performance.now();
-      img = maskCanvas(perf.decode(res.mask), res.mask.width, res.mask.height);
-      perf.decodeMs = performance.now() - t;
-    } else if (res.png) {
-      img = new Image(); img.src = "data:image/png;base64," + res.png; await img.decode();
-    } else return;
-  } catch (err) { console.warn("mask decode failed", err); return; }   // keep the previous echo
-  const now = performance.now();
-  perf.ghosts.push({ img, bounds: res.bounds, frame: res.frame, born: now });
+    if (res.mask && perf.decode) img = maskCanvas(perf.decode(res.mask), res.mask.width, res.mask.height);
+    else if (res.png) { img = new Image(); img.src = "data:image/png;base64," + res.png; await img.decode(); }
+    else return;
+  } catch (err) { console.warn("mask decode failed", err); return; }
+  perf.ghosts.push({ img, bounds: res.bounds, frame: res.frame, born: performance.now() });
   if (perf.ghosts.length > GHOST_MAX) perf.ghosts.shift();
-  stage.echo = `${((now - tCap) / 1000).toFixed(1)}s behind`;
-  setProvenance(null, null);
+  if (!echo.seg) { stage.echo = `${((performance.now() - tCap) / 1000).toFixed(1)}s behind`; setProvenance(null, null); }
 }
 
 const rgb = (c, a) => `rgba(${Math.round(c[0] * 255)},${Math.round(c[1] * 255)},${Math.round(c[2] * 255)},${a})`;
-function drawGhosts(now) {
-  const canvas = $("#ghost"), ctx = canvas.getContext("2d");
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
-  if (!perf.ghosts.length) return;
-  const W = canvas.width, H = canvas.height, sc = perf.scratch, sctx = sc.getContext("2d");
-  const newest = perf.ghosts[perf.ghosts.length - 1];
-  perf.ghosts = perf.ghosts.filter(g => g === newest || (now - g.born) < 14000);
+function tinted(src, color) {     // white-alpha mask → palette-colored mask
+  const sc = perf.scratch, sctx = sc.getContext("2d");
+  if (sc.width !== src.width || sc.height !== src.height) { sc.width = src.width; sc.height = src.height; }
+  else sctx.clearRect(0, 0, sc.width, sc.height);
+  sctx.globalCompositeOperation = "source-over"; sctx.drawImage(src, 0, 0);
+  sctx.globalCompositeOperation = "source-in"; sctx.fillStyle = color; sctx.fillRect(0, 0, sc.width, sc.height);
+  sctx.globalCompositeOperation = "source-over";
+  return sc;
+}
+function frameRect(W, H, fw, fh) {     // frame → screen: fit width; on portrait, stand on the bottom edge
+  const s = W / fw;
+  return { s, ox: 0, oy: W / H >= fw / fh ? (H - fh * s) / 2 : H - fh * s };
+}
+function drawGhosts(now, dt) {
+  const canvas = $("#ghost"), ctx = canvas.getContext("2d"), W = canvas.width, H = canvas.height;
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, W, H);
+  if (perf.mirror) ctx.setTransform(-1, 0, 0, 1, W, 0);
+
+  // 1) SAM snapshots: crisp silhouettes released into a slow rise-and-fade afterglow.
+  perf.ghosts = perf.ghosts.filter(g => now - g.born < 9000);
   for (const g of perf.ghosts) {
-    const age = (now - g.born) / 1000;
-    const isNew = g === newest;
-    // Newest echo fades in; older echoes rise, swell and fade out like heat shimmer.
-    const alpha = isNew ? 0.6 * Math.min(1, age / 0.8) * (perf.on ? 1 : Math.exp(-age / 6))
-                        : 0.45 * Math.exp(-age / 3.2);
+    const age = (now - g.born) / 1000, alpha = 0.38 * Math.min(1, age / 0.6) * Math.exp(-age / 2.6);
     if (alpha < 0.01) continue;
-    const [fw, fh] = g.frame, [x1, y1, x2, y2] = g.bounds;
-    // Fit the frame to the screen width; on portrait screens stand the performer on the bottom edge.
-    const s = W / fw, ox = 0, oy = W / H >= fw / fh ? (H - fh * s) / 2 : H - fh * s;
-    const grow = isNew ? 1 : 1 + 0.03 * age, rise = isNew ? 0 : 14 * age;
-    let w = (x2 - x1) * s * grow, h = (y2 - y1) * s * grow;
-    let x = ox + x1 * s - ((x2 - x1) * s * (grow - 1)) / 2;
-    const y = oy + y1 * s - (h - (y2 - y1) * s) - rise;
-    if (perf.mirror) x = W - x - w;
-    // Tint the white mask with the live palette (accent for the newest, mid tone for older echoes).
-    sc.width = g.img.width; sc.height = g.img.height;
-    sctx.drawImage(g.img, 0, 0);
-    sctx.globalCompositeOperation = "source-in";
-    sctx.fillStyle = rgb(isNew ? cur.c[2] : cur.c[1], 1);
-    sctx.fillRect(0, 0, sc.width, sc.height);
-    sctx.globalCompositeOperation = "source-over";
-    ctx.save();
-    if (perf.mirror) { ctx.translate(x + w, y); ctx.scale(-1, 1); ctx.translate(-x, -y); }
-    ctx.globalAlpha = alpha;
-    ctx.shadowColor = rgb(cur.c[2], 0.9);
-    ctx.shadowBlur = isNew ? 28 : 40;
-    ctx.drawImage(sc, x, y, w, h);
-    ctx.restore();
+    const [fw, fh] = g.frame, [x1, y1, x2, y2] = g.bounds, { s, ox, oy } = frameRect(W, H, fw, fh);
+    const grow = 1 + 0.05 * age, w = (x2 - x1) * s * grow, h = (y2 - y1) * s * grow;
+    const x = ox + x1 * s - ((x2 - x1) * s * (grow - 1)) / 2, y = oy + y2 * s - h - 22 * age;
+    ctx.globalAlpha = alpha; ctx.shadowColor = rgb(cur.c[2], 0.9); ctx.shadowBlur = 36;
+    ctx.drawImage(tinted(g.img, rgb(cur.c[1], 1)), x, y, w, h);
   }
+
+  // 2) Real-time echo: fading motion trail + delayed copies + the live silhouette.
+  if (echo.live && perf.on && now - echo.lastSegAt < 1000) {
+    const { s, ox, oy } = frameRect(W, H, echo.fw, echo.fh), dw = echo.fw * s, dh = echo.fh * s;
+    const tctx = echo.trail.getContext("2d");
+    tctx.globalCompositeOperation = "copy";              // let the trail drift upward like heat
+    tctx.drawImage(echo.trail, 0, -Math.max(0, Math.round(dt * 40)));
+    tctx.globalCompositeOperation = "destination-out";   // and fade
+    tctx.fillStyle = `rgba(0,0,0,${(1 - Math.exp(-dt / 0.5)).toFixed(3)})`;
+    tctx.fillRect(0, 0, echo.trail.width, echo.trail.height);
+    tctx.globalCompositeOperation = "source-over";
+    tctx.globalAlpha = 0.35; tctx.drawImage(echo.live, 0, 0); tctx.globalAlpha = 1;
+
+    ctx.shadowColor = rgb(cur.c[2], 0.8); ctx.shadowBlur = 30;
+    ctx.globalAlpha = 0.42; ctx.drawImage(tinted(echo.trail, rgb(cur.c[1], 1)), ox, oy, dw, dh);
+    ECHO_DELAYS.forEach((lag, k) => {
+      const past = echo.ring[echo.ring.length - 1 - lag];
+      if (!past) return;
+      ctx.globalAlpha = 0.26 - k * 0.07;
+      const grow = 1 + 0.025 * (k + 1);
+      ctx.drawImage(tinted(past, rgb(k % 2 ? cur.c[1] : cur.c[2], 1)),
+        ox - (dw * (grow - 1)) / 2, oy - dh * (grow - 1), dw * grow, dh * grow);
+    });
+    ctx.shadowBlur = 26; ctx.globalAlpha = 0.4;
+    ctx.drawImage(tinted(echo.live, rgb(cur.c[2], 1)), ox, oy, dw, dh);
+
+    if (echo.frameBox) {     // performer box in screen space (un-mirrored) for lyric placement
+      const [x1, y1, x2, y2] = echo.frameBox, sx = W / innerWidth;
+      let a = ox + x1 * s, b = ox + x2 * s;
+      if (perf.mirror) [a, b] = [W - b, W - a];
+      echo.box = [a / sx, (oy + y1 * s) / sx, b / sx, (oy + y2 * s) / sx];
+      echo.boxAt = now;
+    }
+  }
+  ctx.globalAlpha = 1; ctx.shadowBlur = 0;
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
 }
 
 // ---------------------------------------------------------------- input wiring
@@ -643,15 +912,23 @@ function wireInput() {
   const typing = () => document.activeElement === $("#cue");
   addEventListener("keydown", e => {
     if (typing()) return;
-    if (e.code === "Space") { e.preventDefault(); if (!e.repeat) pttDown(); }
-    else if (e.key === "h" || e.key === "H") $("#hud").classList.toggle("hidden");
-    else if (e.key === "p" || e.key === "P") perf.on ? performOff() : performOn();
-    else if (e.key === "m" || e.key === "M") perf.mirror = !perf.mirror;
+    if (e.code === "Space") { e.preventDefault(); if (!e.repeat) pttDown(); return; }
+    if (e.repeat) return;
+    const k = e.key.toLowerCase();
+    if (k === "h") $("#hud").classList.toggle("hidden");
+    else if (k === "p") perf.on ? performOff() : performOn();
+    else if (k === "l") ly.on || ly.pending ? lyricsOff() : lyricsOn();
+    else if (k === "m") perf.mirror = !perf.mirror;
+    else if (k === "e") {
+      ly.effect = EFFECTS[(EFFECTS.indexOf(ly.effect) + 1) % (EFFECTS.length + 1)] || "auto";
+      setStatus("ready", `Lyric effect: ${ly.effect === "auto" ? `auto (${effectNow()})` : ly.effect}`);
+    }
   });
   addEventListener("keyup", e => { if (e.code === "Space" && !typing()) { e.preventDefault(); pttUp(); } });
   addEventListener("blur", pttUp);
   $("#perform").addEventListener("click", () => perf.on ? performOff() : performOn());
-  // Don't keep paying for SAM frames nobody is looking at.
+  $("#lyricsBtn").addEventListener("click", () => ly.on || ly.pending ? lyricsOff() : lyricsOn());
+  // Don't keep paying for camera snapshots nobody is looking at.
   document.addEventListener("visibilitychange", () => { if (document.hidden && perf.on) performOff(); });
   $("#cue").addEventListener("keydown", e => {
     if (e.key === "Enter") {
@@ -660,6 +937,7 @@ function wireInput() {
       e.target.value = ""; e.target.blur();
     } else if (e.key === "Escape") e.target.blur();
   });
+  wireLyricsDrag();
 }
 
 // ---------------------------------------------------------------- boot
@@ -671,6 +949,10 @@ connect();
 $("#go").addEventListener("click", async () => {
   $("#start").remove();
   await initMic();   // ask for the mic now, so the first push-to-talk isn't lost to the permission prompt
+  // Warm the on-device segmenter (~15 MB, cached afterwards) so Perform starts instantly.
+  // Skipped on small screens and data-saver connections; there it loads on first Perform.
+  const saveData = navigator.connection && navigator.connection.saveData;
+  if (innerWidth >= 900 && !saveData) setTimeout(loadSegmenter, 2000);
 });
 </script>
 </body>

@@ -55,6 +55,7 @@ LIMIT_CUES = (6, 10.0)        # 6 burst, then 1 per 10 s
 LIMIT_IMAGES = (1, 60.0)      # 1 per minute
 LIMIT_SAM = (1, 3.0)          # 1 per 3 s
 PERFORM_SECONDS_PER_IP = int(os.environ.get("PERFORM_SECONDS_PER_IP", "180"))
+LYRICS_SECONDS_PER_IP = int(os.environ.get("LYRICS_SECONDS_PER_IP", "1200"))  # 20 min of audio
 
 # Timeouts (s)
 TIMEOUT_ASR_CONNECT = 6

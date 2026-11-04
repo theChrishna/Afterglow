@@ -9,7 +9,7 @@ import time
 from .. import config
 from ..scene import Scene, bank_scene, match_bank, nearest_bank_by_keywords
 from ..telemetry import log_stage
-from .base import PartialCallback, SceneResult
+from .base import EventCallback, PartialCallback, SceneResult
 
 # Same cues as DEMO.md, so a mock run rehearses the real show.
 CANNED_CUES = [
@@ -50,6 +50,55 @@ class MockASRSession:
 
     async def close(self) -> None:
         pass
+
+
+CANNED_LYRICS = [
+    "city lights are bleeding through the rain",
+    "I keep your name inside the static",
+    "we were neon we were never meant to fade",
+    "hold the note until the morning breaks",
+]
+
+
+class MockLyricsSession:
+    """Offline lyrics stream: while audio keeps arriving, emits a canned line word by word
+    in the same event shapes as ENDPOINTING mode (transcript partials, speechComplete)."""
+
+    name = "mock"
+
+    def __init__(self, on_event: EventCallback):
+        self.on_event = on_event
+        self.audio_bytes = 0
+        self._last_audio = 0.0
+        self._task: asyncio.Task | None = None
+
+    async def start(self) -> None:
+        self._task = asyncio.create_task(self._run())
+
+    def send_audio(self, pcm16: bytes) -> None:
+        self.audio_bytes += len(pcm16)
+        self._last_audio = time.monotonic()
+
+    async def _run(self) -> None:
+        turn = 0
+        for line in itertools.cycle(CANNED_LYRICS):
+            words = line.split()
+            await self.on_event({"type": "speechStart", "turnId": turn})
+            for n in range(1, len(words) + 1):
+                while time.monotonic() - self._last_audio > 0.5:  # paused: no mic audio
+                    await asyncio.sleep(0.1)
+                await asyncio.sleep(0.32)
+                await self.on_event({"type": "transcript", "final": False, "transcript": " ".join(words[:n])})
+            await self.on_event({"type": "speechComplete", "turnId": turn, "transcript": line})
+            turn += 1
+            await asyncio.sleep(1.4)
+
+    def stop(self) -> None:
+        if self._task:
+            self._task.cancel()
+
+    async def close(self) -> None:
+        self.stop()
 
 
 _RELATIVE = {

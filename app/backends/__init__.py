@@ -43,3 +43,11 @@ def segmenter(live: bool):
         return MetaSegmenter()
     from .mock import MockSegmenter
     return MockSegmenter()
+
+
+def lyrics_session(on_event, live: bool):
+    if live and not config.MOCK:
+        from .meta_api import MetaASRSession
+        return MetaASRSession(mode="ENDPOINTING", on_event=on_event)
+    from .mock import MockLyricsSession
+    return MockLyricsSession(on_event)

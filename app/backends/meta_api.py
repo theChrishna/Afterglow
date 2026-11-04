@@ -15,7 +15,7 @@ from websockets.asyncio.client import connect
 from .. import config
 from ..scene import BANK, SCENE_JSON_SCHEMA, Scene
 from ..telemetry import log_event, log_stage
-from .base import BackendError, PartialCallback, SceneResult
+from .base import BackendError, EventCallback, PartialCallback, SceneResult
 
 _http: httpx.AsyncClient | None = None
 
@@ -45,17 +45,22 @@ _END = object()
 
 
 class MetaASRSession:
-    """Push-to-talk session on wss://api.meta.ai/v1/asr/realtime.
+    """Session on wss://api.meta.ai/v1/asr/realtime.
 
     Connects on start(); audio queued before the handshake ack is flushed in order once
     the server is ready (the docs allow up to 5 s of backlog ahead of processing).
-    finish() sends {"type":"endStream"} and waits for the transcript with final=true.
+    PUSH_TO_TALK (commands): finish() sends {"type":"endStream"} and waits for the
+    transcript with final=true. ENDPOINTING (lyrics): every server event goes to on_event
+    as it arrives; stop() ends the stream without waiting.
     """
 
     name = "meta_api"
 
-    def __init__(self, on_partial: PartialCallback | None = None):
+    def __init__(self, on_partial: PartialCallback | None = None, mode: str = "PUSH_TO_TALK",
+                 on_event: EventCallback | None = None):
         self.on_partial = on_partial
+        self.on_event = on_event
+        self.mode = mode
         self._queue: asyncio.Queue = asyncio.Queue()
         self._final: asyncio.Future[str] = asyncio.get_running_loop().create_future()
         self._task: asyncio.Task | None = None
@@ -112,7 +117,7 @@ class MetaASRSession:
                     "authorization": {"accessToken": f"Bearer {config.MODEL_API_KEY}"},
                     "audioEncoding": "PCM_24KHZ",
                     "model": config.ASR_MODEL,
-                    "mode": "PUSH_TO_TALK",
+                    "mode": self.mode,
                     "languageBias": ["English"],
                 }))
                 await asyncio.wait_for(self._await_ack(ws), config.TIMEOUT_ASR_CONNECT)
@@ -163,6 +168,11 @@ class MetaASRSession:
                 continue
             ev = json.loads(m)
             t = ev.get("type")
+            if self.on_event and t != "audioProgress":
+                try:
+                    await self.on_event(ev)
+                except Exception:
+                    pass
             if t == "transcript":
                 text = (ev.get("transcript") or "").strip()
                 if ev.get("final"):
@@ -175,6 +185,12 @@ class MetaASRSession:
                         pass
             elif t == "error":
                 self._fail(f"ASR error: {ev.get('message')}")
+
+    def stop(self) -> None:
+        """End the stream (server flushes and closes); don't wait for a transcript."""
+        if self.t_end is None:
+            self.t_end = time.perf_counter()
+            self._queue.put_nowait(_END)
 
     async def close(self) -> None:
         if self._task and not self._task.done():

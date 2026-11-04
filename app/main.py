@@ -25,12 +25,19 @@ config.BANK_DIR.mkdir(parents=True, exist_ok=True)
 app.mount("/backdrops", StaticFiles(directory=config.BANK_DIR), name="backdrops")
 
 MAX_UTTERANCE_BYTES = 30 * 48000  # 30 s of 24 kHz s16 mono
+CH_COMMAND, CH_LYRICS = 0x01, 0x02
 MAX_FRAME_BYTES = 64 * 1024
 EST_ASR = 0.002
 EST_SPARK = 0.003
 
 _generated: OrderedDict[str, bytes] = OrderedDict()  # generated backdrops, newest last
 _GENERATED_MAX = 40
+
+
+async def _close_later(session, delay: float = 6.0) -> None:
+    """Give a stopped stream time to flush its last words, then make sure it is closed."""
+    await asyncio.sleep(delay)
+    await session.close()
 
 
 def client_ip(headers, client) -> str:
@@ -80,6 +87,7 @@ class Stage:
         self.scene: Scene = DEFAULT_SCENE
         self.asr = None
         self.asr_bytes = 0
+        self.lyrics = None
         self.cue_seq = 0
         self._send_lock = asyncio.Lock()
         self._tasks: set[asyncio.Task] = set()
@@ -116,11 +124,20 @@ class Stage:
         finally:
             if self.asr:
                 await self.asr.close()
+            if self.lyrics:
+                await self.lyrics.close()
             for t in list(self._tasks):
                 t.cancel()
 
-    def on_audio(self, frame: bytes) -> None:
-        if not self.asr or len(frame) > MAX_FRAME_BYTES:
+    def on_audio(self, packet: bytes) -> None:
+        """Binary frames carry a 1-byte channel tag: 0x01 = held-key command, 0x02 = lyrics."""
+        if not packet or len(packet) > MAX_FRAME_BYTES:
+            return
+        channel, frame = packet[0], packet[1:]
+        if channel == CH_LYRICS:
+            self.on_lyrics_audio(frame)
+            return
+        if channel != CH_COMMAND or not self.asr:
             return
         if self.asr_bytes + len(frame) > MAX_UTTERANCE_BYTES:
             self.spawn(self.end_ptt())  # runaway mic: close the utterance
@@ -138,6 +155,10 @@ class Stage:
             await self.start_ptt()
         elif kind == "ptt_end":
             self.spawn(self.end_ptt())
+        elif kind == "lyrics_start":
+            await self.start_lyrics()
+        elif kind == "lyrics_stop":
+            await self.stop_lyrics("stopped")
         elif kind == "text_cue":
             text = str(m.get("text", "")).strip()[:300]
             if text:
@@ -145,6 +166,62 @@ class Stage:
                     await self.status("limited", "Too many cues; wait a few seconds.")
                     return
                 self.spawn(self.handle_cue(text, time.perf_counter(), via="text"))
+
+    # ---------------------------------------------------------------- lyrics (continuous speech)
+
+    async def start_lyrics(self) -> None:
+        if self.lyrics:
+            return
+        if limits.seconds_left(self.ip, "lyrics", config.LYRICS_SECONDS_PER_IP) <= 0:
+            await self.send(type="lyrics_state", on=False, reason="used",
+                            detail=f"Lyrics are limited to {config.LYRICS_SECONDS_PER_IP // 60} min per visitor per day.")
+            return
+        live = not config.MOCK and limits.can_spend(EST_ASR)
+        if not config.MOCK and not live:
+            await self.send(type="lyrics_state", on=False, reason="budget", detail="Lyrics paused: daily budget reached.")
+            return
+
+        async def on_event(ev: dict) -> None:
+            t = ev.get("type")
+            if t == "transcript" and not ev.get("final"):
+                await self.send(type="lyric", text=ev.get("transcript", ""), done=False)
+            elif t == "speechComplete":
+                await self.send(type="lyric", text=ev.get("transcript", ""), done=True)
+            elif t == "error":
+                await self.stop_lyrics("error")
+
+        self.lyrics = backends.lyrics_session(on_event, live)
+        try:
+            await self.lyrics.start()
+        except Exception as e:
+            log_stage("lyrics_start", None, False, self.lyrics.name, error=type(e).__name__)
+            self.lyrics = None
+            await self.send(type="lyrics_state", on=False, reason="error", detail="Lyrics unavailable right now.")
+            return
+        log_event("lyrics_start", backend=self.lyrics.name)
+        await self.send(type="lyrics_state", on=True,
+                        left_s=round(limits.seconds_left(self.ip, "lyrics", config.LYRICS_SECONDS_PER_IP)))
+
+    def on_lyrics_audio(self, frame: bytes) -> None:
+        if not self.lyrics:
+            return
+        limits.use_seconds(self.ip, "lyrics", len(frame) / 48000)
+        if limits.seconds_left(self.ip, "lyrics", config.LYRICS_SECONDS_PER_IP) <= 0:
+            self.spawn(self.stop_lyrics("used"))
+            return
+        self.lyrics.send_audio(frame)
+
+    async def stop_lyrics(self, reason: str) -> None:
+        session, self.lyrics = self.lyrics, None
+        if session is None:
+            return
+        session.stop()  # server flushes and closes; the session task charges the audio
+        self.spawn(_close_later(session))
+        detail = {"used": f"Lyrics time used up ({config.LYRICS_SECONDS_PER_IP // 60} min per visitor per day).",
+                  "error": "Lyrics stream dropped; press L to restart."}.get(reason, "")
+        await self.send(type="lyrics_state", on=False, reason=reason, detail=detail)
+
+    # ---------------------------------------------------------------- commands (hold to talk)
 
     async def start_ptt(self) -> None:
         if self.asr:
