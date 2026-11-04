@@ -702,7 +702,7 @@ function loadSegmenter() {
   if (!segmenterPromise) segmenterPromise = (async () => {
     const { FilesetResolver, ImageSegmenter } = await import(`${MP_BASE}/vision_bundle.mjs`);
     const files = await FilesetResolver.forVisionTasks(`${MP_BASE}/wasm`);
-    const opts = delegate => ({ baseOptions: { modelAssetPath: MP_MODEL, delegate }, runningMode: "VIDEO",
+    const opts = delegate => ({ baseOptions: { modelAssetPath: MP_MODEL, delegate }, runningMode: "VIDEO", canvas: echo.mpCanvas,
       outputCategoryMask: false, outputConfidenceMasks: true });
     try { const g = await ImageSegmenter.createFromOptions(files, opts("GPU")); echo.delegate = "GPU"; return g; }
     catch { const c = await ImageSegmenter.createFromOptions(files, opts("CPU")); echo.delegate = "CPU"; return c; }
@@ -714,7 +714,7 @@ const perf = { on: false, stream: null, timer: null, inflight: false, left: null
   cap: canvas2(FRAME_W, FRAME_H), scratch: canvas2(1, 1), snapshots: true };
 const ECHO_DELAYS_S = [0.10, 0.22, 0.38];    // trailing copies only; the primary silhouette is never delayed
 const RING_N = 40, ALPHA_LUT = new Uint8Array(256).map((_, i) => { const c = i / 255; return c <= 0.35 ? 0 : c >= 0.65 ? 255 : ((c - 0.35) / 0.3) * 255; });
-const echo = { seg: null, live: null, trail: null, ring: [], ringAt: 0, lastVideoTime: -1, lastSegAt: 0,
+const echo = { mpCanvas: Object.assign(document.createElement('canvas'), { width: 640, height: 360 }), boxN: 0, seg: null, live: null, trail: null, ring: [], ringAt: 0, lastVideoTime: -1, lastSegAt: 0,
   fw: 0, fh: 0, box: null, boxAt: 0, fps: 0 };
 
 function perfButton() {
@@ -779,6 +779,7 @@ function runSegmenter(v, now) {
     const m = result.confidenceMasks && result.confidenceMasks[0];
     if (!m) return;
     const tc = performance.now();
+    if (echo.gpu !== false && gpuMask(m, now)) { echo.convMs = performance.now() - tc; return; }
     const w = m.width, h = m.height, conf = m.getAsFloat32Array();
     if (!echo.live || echo.live.width !== w || echo.live.height !== h) {
       // (re)allocate once: a fixed ring of mask canvases + one trail; nothing is allocated per frame afterwards
@@ -806,6 +807,52 @@ function runSegmenter(v, now) {
   echo.lastSegAt = now;
   echo.segMs = performance.now() - t0;
   lat.segEma = lat.segEma ? lat.segEma * 0.9 + echo.segMs * 0.1 : echo.segMs;
+}
+// GPU mask path: MediaPipe's mask texture is turned into white-with-alpha by one shader pass in the
+// segmenter's own WebGL canvas, then GPU-copied into a preallocated ring canvas. No CPU readback of the
+// full mask. Falls back to the CPU path (echo.gpu = false) if anything is unsupported.
+function gpuMask(m, now) {
+  try {
+    if (!m.getAsWebGLTexture) throw new Error("no getAsWebGLTexture");
+    const cv = echo.mpCanvas, gl = cv.getContext("webgl2");
+    if (!gl) throw new Error("no gl");
+    const w = m.width, h = m.height;
+    if (!echo.gprog) {
+      const sh = (t, src) => { const o = gl.createShader(t); gl.shaderSource(o, src); gl.compileShader(o);
+        if (!gl.getShaderParameter(o, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(o)); return o; };
+      const pr = gl.createProgram();
+      gl.attachShader(pr, sh(gl.VERTEX_SHADER, "#version 300 es\nout vec2 uv;void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);uv=vec2(p.x,p.y);gl_Position=vec4(p*2.-1.,0,1);}"));
+      gl.attachShader(pr, sh(gl.FRAGMENT_SHADER, "#version 300 es\nprecision mediump float;in vec2 uv;uniform sampler2D m;out vec4 o;void main(){float a=smoothstep(.35,.65,texture(m,uv).r);o=vec4(a,a,a,a);}"));
+      gl.linkProgram(pr); if (!gl.getProgramParameter(pr, gl.LINK_STATUS)) throw new Error("link");
+      echo.gprog = pr; echo.gvao = gl.createVertexArray();
+    }
+    const tex = m.getAsWebGLTexture();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    if (cv.width !== w || cv.height !== h) { cv.width = w; cv.height = h; }
+    gl.viewport(0, 0, w, h);
+    gl.useProgram(echo.gprog); gl.bindVertexArray(echo.gvao);
+    gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.uniform1i(gl.getUniformLocation(echo.gprog, "m"), 0);
+    gl.disable(gl.BLEND); gl.drawArrays(gl.TRIANGLES, 0, 3);
+    if (!echo.ring.length || echo.fw !== w || echo.fh !== h) {
+      echo.ring = Array.from({ length: RING_N }, () => ({ c: canvas2(w, h), t: 0 }));
+      echo.rctx = echo.ring.map(r => r.c.getContext("2d"));
+      echo.trail = canvas2(w, h); echo.head = -1;
+    }
+    echo.head = (echo.head + 1) % RING_N;
+    const c2 = echo.rctx[echo.head]; c2.globalCompositeOperation = "copy"; c2.drawImage(cv, 0, 0);
+    echo.ring[echo.head].t = now; echo.live = echo.ring[echo.head].c;
+    echo.fw = w; echo.fh = h;
+    if (++echo.boxN % 5 === 0) {     // tiny readback (48x27) for the lyric-placement box only
+      const sm = echo.small || (echo.small = canvas2(48, 27)), sx = sm.getContext("2d", { willReadFrequently: true });
+      sx.globalCompositeOperation = "copy"; sx.drawImage(cv, 0, 0, 48, 27);
+      const d = sx.getImageData(0, 0, 48, 27).data; let x1 = 48, y1 = 27, x2 = -1, y2 = -1;
+      for (let i = 0, y = 0; y < 27; y++) for (let x = 0; x < 48; x++, i += 4) if (d[i + 3] > 128) {
+        if (x < x1) x1 = x; if (x > x2) x2 = x; if (y < y1) y1 = y; if (y > y2) y2 = y; }
+      echo.frameBox = x2 >= 0 ? [x1 * w / 48, y1 * h / 27, (x2 + 1) * w / 48, (y2 + 1) * h / 27] : null;
+    }
+    echo.gpu = true; return true;
+  } catch (err) { console.warn("GPU mask path unavailable, using CPU buffers", err); echo.gpu = false; return false; }
 }
 function pastMask(now, delayS) {      // newest ring slot at least delayS old
   const want = now - delayS * 1000;
@@ -844,7 +891,7 @@ function updateLatHud(now) {
   const tr = perf.stream && perf.stream.getVideoTracks()[0], st = tr ? tr.getSettings() : {};
   el.textContent = [
     `segmenter   ${f(lat.segEma)} ms  (${echo.delegate || "?"})`,
-    `  mask→canvas ${f(echo.convMs)} ms  (${echo.fw}x${echo.fh})`,
+    `  mask→canvas ${f(echo.convMs)} ms  (${echo.fw}x${echo.fh}, ${echo.gpu ? "GPU texture" : "CPU buffers"})`,
     `cam frame   ${f(lat.camIv)} ms  (${f(lat.camIv ? 1000 / lat.camIv : 0, 0)} fps)`,
     `seg runs/s  ${f(echo.fps, 0)}`,
     `draw frame  ${f(lat.drawIv)} ms`,
