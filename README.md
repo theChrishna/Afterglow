@@ -35,7 +35,7 @@ scenes, no API calls and no key needed. Tests: `.venv/bin/python -m pytest`.
 
 | Preset | Background | Echo | Lyrics |
 |---|---|---|---|
-| **Reel** (default) | *Violet room*: lit wall gradient, brighter ceiling band, pink floor strip, slow breathing. Cues tint it. | *Neon contour*: a row of 6 outline copies beside the performer, each from k×130 ms ago (pink outer, orange/yellow inner, additive glow, older copies dimmer, floor line). The current outline has no added delay. | *Handwritten*: up to 2 lines, revealed letter by letter, one line above the performer's head with an eased follow. Each phrase uses the next font in a fixed order (Caveat, Gaegu, Shadows Into Light, Reenie Beanie, Fraunces). Optional HUD details: cursor box, x/y readout, hairline leader lines. |
+| **Reel** (default) | *Violet room*: lit wall gradient, brighter ceiling band, pink floor strip, slow breathing. Cues tint it. | *Neon contour*: a tight row of 6 outline copies just behind the performer, each from k×130 ms ago and lined up by head position (pink outer, orange/yellow inner, additive glow, older copies dimmer, floor line). The current outline has no added delay. | *Handwritten*: up to 2 lines, revealed letter by letter, one line above the performer's head with an eased follow. Each phrase uses the next font in a fixed order (Caveat, Gaegu, Shadows Into Light, Reenie Beanie, Fraunces). Optional HUD details: cursor box, x/y readout, hairline leader lines. |
 | **Classic** | Moods with Muse Image backdrops | Ghost (difference-blend silhouette, trail, delayed copies) | Kinetic type, 6 effects |
 
 - Switch with the **Reel/Classic** button, the **Reel look** chip, or under More. The choice is
@@ -44,6 +44,11 @@ scenes, no API calls and no key needed. Tests: `.venv/bin/python -m pytest`.
   and, after Enter, also starts the camera and lyrics. So does clicking Reel look. Ordinary first
   visits show the Reel visuals but start nothing.
 - The look is deterministic (fixed font order, no randomness), so recordings are reproducible.
+- **Lyrics are always in Latin script.** If the speech service returns Hindi in Devanagari, the
+  page transliterates it to Hinglish spelling before showing it (क्या बात है → "kya baat hai",
+  मैं तुमसे प्यार करता हूँ → "main tumse pyaar karta hun"). Inherent vowels follow Hindi
+  pronunciation (dil, kamra, samajhna, zindagi). English words pass through unchanged. Hindi-script
+  spellings of English loanwords come out approximate (ऐप → "aip").
 - While the Violet room is on, cues are sent with `no_backdrop`, so the server skips Muse Image
   generation (the backdrop is hidden anyway). This saves credits and keeps the demo button cheap.
 - Inspired by reference frames of a projected neon-contour performance. No artwork or text from
@@ -126,6 +131,9 @@ timings. Inference stays on the main thread; moving it to a worker was not attem
 - Phones and tablets: layout checked at 375 px wide in a desktop browser, not on a device.
 - Singing or speech accuracy of the handwritten lyrics: tested by feeding words to the page,
   not with a live voice (no mic in the test browser).
+- Hinglish lyrics: the transliteration was tested on typed Hindi text. Whether the live speech
+  service returns Hindi as Devanagari, Latin or a translation, with `languageBias: ["English"]`,
+  was not checked with a real voice.
 - Head-following and the pose-history row were checked with a synthetic subject (a photo panning
   over a plain wall), not a moving person.
 - Safari and Firefox: `requestVideoFrameCallback`, canvas `filter` (feather) and the GPU mask
