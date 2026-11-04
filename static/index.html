@@ -277,7 +277,7 @@
       <div id="modePanel">
         <h3>Camera ambience</h3>
         <label><input type="checkbox" id="mMirror" checked> Mirror (F)</label>
-        <label><input type="checkbox" id="mTrail"> Echo trail (Replace)</label>
+        <label><input type="checkbox" id="mTrail"> Ghost echo trail (Replace, Overlay, Projection)</label>
         <div id="ovCtl">
           <label>Ambience strength <input type="range" id="ovStrength" min="10" max="90" value="55" aria-label="Ambience strength"> <span id="vOv">55%</span></label>
           <div class="opts" role="radiogroup" aria-label="Light on the performer">
@@ -291,7 +291,7 @@
       <label>Background <select id="roomSel" aria-label="Background"><option value="1">Violet room</option><option value="0">Moods and backdrops</option></select></label>
       <label>Echo <select id="echoSel" aria-label="Echo style"><option value="neon">Neon contour</option><option value="ghost">Ghost (classic)</option></select></label>
       <label>Trail source <select id="trailSel" aria-label="Neon trail source"><option value="motion">Motion only</option><option value="full">Full pose history</option></select></label>
-      <label>Spacing <select id="spaceSel" aria-label="Neon trail spacing"><option value="time">Time</option><option value="distance">Distance</option></select></label>
+      <label>Spacing <select id="spaceSel" aria-label="Echo trail spacing"><option value="time">Time</option><option value="distance">Distance</option></select></label>
       <h3>Lyrics</h3>
       <label>Style <select id="lyricSel" aria-label="Lyric style"><option value="hand">Handwritten</option><option value="kinetic">Kinetic</option></select></label>
       <label><input type="checkbox" id="optFollow" checked> Follow subject</label>
@@ -963,8 +963,7 @@ function loadSegmenter() {
 const canvas2 = (w, h) => Object.assign(document.createElement("canvas"), { width: w, height: h });
 const perf = { on: false, stream: null, timer: null, inflight: false, left: null, ghosts: [], mirror: true,
   cap: canvas2(FRAME_W, FRAME_H), scratch: canvas2(1, 1), snapshots: true };
-const ECHO_DELAYS_S = [0.10, 0.22, 0.38];    // trailing copies only; the primary silhouette is never delayed
-const RING_N = 40, ALPHA_LUT = new Uint8Array(256).map((_, i) => { const c = i / 255; return c <= 0.35 ? 0 : c >= 0.65 ? 255 : ((c - 0.35) / 0.3) * 255; });
+const RING_N = 64, ALPHA_LUT = new Uint8Array(256).map((_, i) => { const c = i / 255; return c <= 0.35 ? 0 : c >= 0.65 ? 255 : ((c - 0.35) / 0.3) * 255; });
 const echo = { mpCanvas: Object.assign(document.createElement('canvas'), { width: 640, height: 360 }), boxN: 0, seg: null, live: null, trail: null, ring: [], ringAt: 0, lastVideoTime: -1, lastSegAt: 0,
   fw: 0, fh: 0, box: null, boxAt: 0, fps: 0 };
 
@@ -1054,6 +1053,7 @@ function runSegmenter(v, now) {
     echo.live = echo.ring[echo.head].c;     // the CURRENT mask, zero added delay
     echo.fw = w; echo.fh = h;
     echo.frameBox = x2 >= 0 ? [x1, y1, x2 + 1, y2 + 1] : null;
+    ringMeta();
     if (x2 >= 0) {
       const yy = Math.min(h - 1, y1 + 4);
       const hx = longestRun(x1, x2, x => (px[yy * w + x] >>> 24) > 128);
@@ -1114,6 +1114,7 @@ function gpuMask(m, now) {
         echo.headPos = [(hx + 0.5) * w / 48, y1 * h / 27];
       }
     }
+    ringMeta();
     echo.gpu = true; return true;
   } catch (err) { console.warn("GPU mask path unavailable, using CPU buffers", err); echo.gpu = false; return false; }
 }
@@ -1125,13 +1126,47 @@ function longestRun(a, b, on) {     // centre of the longest run of "on" cells i
   }
   return bestC;
 }
-function pastMask(now, delayS) {      // newest ring slot at least delayS old
-  const want = now - delayS * 1000;
-  for (let k = 1; k < RING_N; k++) {
-    const r = echo.ring[(echo.head - k + RING_N) % RING_N];
-    if (r.t && r.t <= want) return r.c;
+// ---- shared echo placement: ONE model for Ghost and Neon contour, in every look and ambience.
+// Copies are past masks from the segmentation ring, drawn at identity (exactly where the subject was at
+// that time): no offsets, no side-picking, no fixed step, no recentring. Only the rendering differs.
+//   Spacing Time: copy k is the newest mask at least k x 0.11 s old.
+//   Spacing Distance: walking back through the ring, a copy is taken once the subject's centre has moved
+//     >= 0.12 x its width from the previous copy (or 0.25 s has passed), so slow movement still separates.
+const TRAIL_STEP_S = 0.11, TRAIL_DIST = 0.12, TRAIL_DIST_MAX_S = 0.25, TRAIL_MAX = 7, GHOST_COPIES = 3;
+const trailIdx = new Int16Array(TRAIL_MAX);          // ring slots chosen this frame, newest copy first
+function trailSlots(now, n) {
+  if (!echo.ring.length || echo.head < 0) return 0;
+  let c = 0;
+  if (look.space === "distance") {
+    let ref = echo.ring[echo.head];
+    for (let j = 1; j < RING_N && c < n; j++) {
+      const i = (echo.head - j + RING_N) % RING_N, r = echo.ring[i];
+      if (!r.t || r.t > ref.t) break;
+      const far = ref.bw > 0 && r.bw > 0 && Math.hypot(r.cx - ref.cx, r.cy - ref.cy) >= TRAIL_DIST * Math.max(8, ref.bw);
+      if (far || ref.t - r.t >= TRAIL_DIST_MAX_S * 1000) { trailIdx[c++] = i; ref = r; }
+    }
+  } else {
+    let j = 1;
+    for (let k = 1; k <= n; k++) {
+      const want = now - k * TRAIL_STEP_S * 1000;
+      for (; j < RING_N; j++) { const r = echo.ring[(echo.head - j + RING_N) % RING_N]; if (!r.t || r.t <= want) break; }
+      if (j >= RING_N) break;
+      const i = (echo.head - j + RING_N) % RING_N;
+      if (!echo.ring[i].t) break;
+      trailIdx[c++] = i;
+    }
   }
-  return null;
+  return c;
+}
+function ringMeta() {                                 // centre/width of the subject in the newest ring slot (Distance spacing)
+  const r = echo.ring[echo.head], b = echo.frameBox;
+  if (b) { r.cx = (b[0] + b[2]) / 2; r.cy = (b[1] + b[3]) / 2; r.bw = b[2] - b[0]; } else r.bw = 0;
+}
+const CUT_TAPS = [[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1], [.7, .7], [-.7, .7], [.7, -.7], [-.7, -.7]];
+function cutBody(ctx, mask, x, y, w, h, r) {          // erase everything inside the mask grown by r px
+  ctx.globalCompositeOperation = "destination-out"; ctx.globalAlpha = 1; ctx.shadowBlur = 0;
+  for (const [dx, dy] of CUT_TAPS) ctx.drawImage(mask, x + dx * r, y + dy * r, w, h);
+  ctx.globalCompositeOperation = "source-over";
 }
 
 // ---- latency readout (key T). Numbers are estimates from requestVideoFrameCallback metadata.
@@ -1246,7 +1281,7 @@ function drawGhosts(now, dt) {
   const ncv = $("#trail"), nctx = ncv.getContext("2d");     // neon trail layer (named so it can't clash with the ghost trail's `tctx` below)
   nctx.setTransform(1, 0, 0, 1, 0, 0); nctx.clearRect(0, 0, ncv.width, ncv.height);
 
-  const md = effMode() === "overlay" ? "composite" : effMode();   // projection: no light on the performer, so no echo/glow at all
+  const md = effMode() === "overlay" ? "composite" : effMode();   // Replace and Overlay draw the same echo; the body is always cut out of it
   // 1) SAM snapshots: crisp silhouettes released into a slow rise-and-fade afterglow.
   perf.ghosts = perf.ghosts.filter(g => now - g.born < 9000);
   for (const g of md === "off" && look.echo === "ghost" ? perf.ghosts : []) {
@@ -1259,34 +1294,42 @@ function drawGhosts(now, dt) {
     ctx.drawImage(tinted(g.img, rgb(cur.c[1], 1)), x, y, w, h);
   }
 
-  // 2) Real-time echo: fading motion trail + delayed copies + the live silhouette.
+  // 2) Real-time echo: shared-placement copies (Ghost or Neon), body cut out; Off adds Ghost's heat trail + live glow.
   if (echo.live && perf.on && now - echo.lastSegAt < 1000) {
     const { s, ox, oy } = frameRect(W, H, echo.fw, echo.fh), dw = echo.fw * s, dh = echo.fh * s;
-    const tctx = echo.trail.getContext("2d");
-    tctx.globalCompositeOperation = "copy";              // let the trail drift upward like heat
-    tctx.drawImage(echo.trail, 0, -Math.max(0, Math.round(dt * 40)));
-    tctx.globalCompositeOperation = "destination-out";   // and fade
-    tctx.fillStyle = `rgba(0,0,0,${(1 - Math.exp(-dt / 0.5)).toFixed(3)})`;
-    tctx.fillRect(0, 0, echo.trail.width, echo.trail.height);
-    tctx.globalCompositeOperation = "source-over";
-    tctx.globalAlpha = 0.35; tctx.drawImage(echo.live, 0, 0); tctx.globalAlpha = 1;
-
-    const neonOn = look.echo === "neon" && (md !== "projection" || look.lightOn);
-    const light = md === "composite" ? 0.5 : 1, showEcho = !neonOn && look.echo === "ghost" && (md === "off" || (md === "composite" && modes.trail));
-    ctx.shadowColor = rgb(cur.c[2], 0.8); ctx.shadowBlur = 30;
-    ctx.globalAlpha = 0.42 * light;
-    if (showEcho) ctx.drawImage(tinted(echo.trail, rgb(cur.c[1], 1)), ox, oy, dw, dh);
-    (showEcho ? ECHO_DELAYS_S : []).forEach((lag, k) => {
-      const past = pastMask(now, lag);
-      if (!past) return;
-      ctx.globalAlpha = (0.26 - k * 0.07) * light;
-      const grow = 1 + 0.025 * (k + 1);
-      ctx.drawImage(tinted(past, rgb(k % 2 ? cur.c[1] : cur.c[2], 1)),
-        ox - (dw * (grow - 1)) / 2, oy - dh * (grow - 1), dw * grow, dh * grow);
-    });
+    const ghostOn = look.echo === "ghost", off = md === "off", light = md === "composite" ? 0.5 : 1;
+    if (ghostOn && off) {                                // Off only: the drifting heat trail (not a past position, so not in the ambiences)
+      const tctx = echo.trail.getContext("2d");
+      tctx.globalCompositeOperation = "copy";            // let the trail drift upward like heat
+      tctx.drawImage(echo.trail, 0, -Math.max(0, Math.round(dt * 40)));
+      tctx.globalCompositeOperation = "destination-out"; // and fade
+      tctx.fillStyle = `rgba(0,0,0,${(1 - Math.exp(-dt / 0.5)).toFixed(3)})`;
+      tctx.fillRect(0, 0, echo.trail.width, echo.trail.height);
+      tctx.globalCompositeOperation = "source-over";
+      tctx.globalAlpha = 0.35; tctx.drawImage(echo.live, 0, 0); tctx.globalAlpha = 1;
+      ctx.shadowColor = rgb(cur.c[2], 0.8); ctx.shadowBlur = 30; ctx.globalAlpha = 0.42;
+      ctx.drawImage(tinted(echo.trail, rgb(cur.c[1], 1)), ox, oy, dw, dh);
+    }
+    // Ghost copies: the shared placement (true past positions, at identity), rendered as tinted silhouettes
+    // (drawn unglowed in mask space, body cut out, THEN glowed, so a still body gets no halo around it)
+    const nG = ghostOn && (off || modes.trail) ? trailSlots(now, GHOST_COPIES) : 0;
+    if (nG) {
+      if (!echo.gacc || echo.gacc.width !== echo.fw || echo.gacc.height !== echo.fh) echo.gacc = canvas2(echo.fw, echo.fh);
+      const g = echo.gacc.getContext("2d"); g.globalCompositeOperation = "source-over"; g.globalAlpha = 1; g.clearRect(0, 0, echo.fw, echo.fh);
+      for (let k = nG - 1; k >= 0; k--) {
+        g.globalAlpha = (0.26 - k * 0.07) * light;
+        g.drawImage(tinted(echo.ring[trailIdx[k]].c, rgb(k % 2 ? cur.c[1] : cur.c[2], 1)), 0, 0);
+      }
+      cutBody(g, echo.live, 0, 0, echo.fw, echo.fh, 3.5 / Math.max(s, 0.1));
+      ctx.shadowColor = rgb(cur.c[2], 0.8); ctx.shadowBlur = 30; ctx.globalAlpha = 1;
+      ctx.drawImage(echo.gacc, ox, oy, dw, dh);
+    }
+    // the subject is masked out of the Ghost layer (it sits above the performer's cut-out), like Neon's
+    if (ghostOn) cutBody(ctx, echo.live, ox, oy, dw, dh, 3.5);
     ctx.shadowBlur = 26; ctx.globalAlpha = 0.4;
-    if (md === "off" && look.echo === "ghost") ctx.drawImage(tinted(echo.live, rgb(cur.c[2], 1)), ox, oy, dw, dh);
+    if (off && ghostOn) ctx.drawImage(tinted(echo.live, rgb(cur.c[2], 1)), ox, oy, dw, dh);   // Off: no camera image, this glow is the performer
     ctx.shadowBlur = 0; ctx.globalAlpha = 1;
+    const neonOn = look.echo === "neon";               // every ambience, Projection included: it is never drawn on the body
     if (neonOn) {                                      // own canvas, under the performer's cut-out
       nctx.setTransform(perf.mirror ? -1 : 1, 0, 0, 1, perf.mirror ? ncv.width : 0, 0);
       drawNeon(nctx, now, dt, s, ox, oy);
@@ -1507,27 +1550,20 @@ function wireModes() {
   setMode("off");
 }
 
-// ---------------------------------------------------------------- Neon contour: delayed trail at the subject's real past positions
-// Nothing is drawn on the performer's own silhouette. Outline-only snapshots of the (smoothed) mask go into a
-// preallocated ring, kept in the same mask coordinates as the live silhouette: no crop, no recentring, no
-// offset. Copy k is drawn exactly where the subject was k snapshots ago; then everything inside the CURRENT
-// mask grown by ~4 px is erased, so only the parts of past outlines lying outside the body remain. A still
-// subject leaves almost nothing; a moving one leaves contours along the path it has just taken.
-//   Trail source: Motion only (default) also fades the whole trail with a motion measure (XOR of the last two
-//     snapshots), which hides segmentation-jitter slivers on a still body. Full pose history: no fade.
-//   Spacing: Time = a snapshot every 110 ms. Distance = a snapshot once the subject's centre has moved
-//     >= 0.12 x its width since the last one (or after 250 ms), so slow movement still shows separate copies.
-const NEON_N = 8, NEON_STEP_MS = 110, NEON_DIST = 0.12, NEON_DIST_MAX_MS = 250;
-const NEON_LIFE_MS = { time: NEON_STEP_MS * (NEON_N + 0.5), distance: 1800 };
+// ---------------------------------------------------------------- Neon contour: outline rendering of the shared trail
+// Placement and timing come from trailSlots (same as Ghost). Each new mask is smoothed once and its outline
+// cached beside its ring slot, so a copy costs one tinted draw. After the copies, everything inside the
+// current mask grown ~4 px is erased: only past outlines outside the body remain, nothing is drawn on it.
+//   Trail source: Motion only (default) fades the whole trail with a motion measure (XOR of the live mask and
+//     the newest copy), hiding segmentation-jitter slivers on a still body. Full pose history: no fade.
 const NEON_OFFS = [[1, 0], [-1, 0], [0, 1], [0, -1], [.7, .7], [-.7, .7], [.7, -.7], [-.7, -.7]];
-const NEON_DIL = [[0, 0], [2, 0], [-2, 0], [0, 2], [0, -2], [1.4, 1.4], [-1.4, 1.4], [1.4, -1.4], [-1.4, -1.4]];   // half-res px: ~4 px at full res
-const neon = { w: 0, h: 0, ring: [], head: -1, lastCap: 0, gain: 0, cells: 0 };
+const neon = { w: 0, h: 0, olr: [], lastT: -1, gain: 0, cells: 0, probeAt: 0 };
 function neonEnsure(w, h) {
   if (neon.w === w && neon.h === h) return;
   const hw = Math.max(1, w >> 1), hh = Math.max(1, h >> 1);
-  Object.assign(neon, { w, h, hw, hh, head: -1, lastCap: 0, gain: 0, cells: 0,
+  Object.assign(neon, { w, h, hw, hh, lastT: -1, gain: 0, cells: 0, probeAt: 0,
     mh: canvas2(hw, hh), er: canvas2(hw, hh), acc: canvas2(hw, hh), tiny: canvas2(32, 18),   // half-res work canvases + motion probe
-    ring: Array.from({ length: NEON_N }, () => ({ mk: canvas2(hw, hh), ol: canvas2(hw, hh), cx: 0, cy: 0, t: 0 })) });
+    olr: Array.from({ length: RING_N }, () => ({ c: canvas2(hw, hh), t: 0 })) });            // outline cache, one per ring slot
   neon.fHalf = "none";                               // smoothing filter, only if this browser really applies it
   try {
     const a = canvas2(40, 40), b = canvas2(40, 40), ag = a.getContext("2d"), bg = b.getContext("2d");
@@ -1552,64 +1588,50 @@ function neonPaint(ctx, src, alpha) {                // one cached outline, at i
   ctx.globalAlpha = alpha; ctx.drawImage(tinted(src, "#ff3d9a"), 0, 0);
   ctx.globalAlpha = alpha * 0.8; ctx.drawImage(tinted(src, neon.gradH), 0, 0);
 }
-function neonCapture(now, fb, dist) {
-  neon.lastCap = !dist && now - neon.lastCap < NEON_STEP_MS * 2 ? neon.lastCap + NEON_STEP_MS : now;   // time: steady 110 ms beat
-  const prev = neon.ring[neon.head];
-  neon.head = (neon.head + 1) % NEON_N;
-  const r = neon.ring[neon.head];
-  const mk = r.mk.getContext("2d"); mk.globalCompositeOperation = "copy"; mk.drawImage(neon.mh, 0, 0);
-  outlineOf(neon.mh, neon.er, r.ol, NEON_OFFS);       // outline once per snapshot, in place
-  r.cx = (fb[0] + fb[2]) / 2; r.cy = (fb[1] + fb[3]) / 2; r.t = now;
-  if (prev && prev.t && now - prev.t < NEON_STEP_MS * 3) {   // motion probe: XOR of this and the previous snapshot, 32x18 cells
-    const t = neon.tiny.getContext("2d", { willReadFrequently: true });
-    t.globalCompositeOperation = "copy"; t.drawImage(r.mk, 0, 0, 32, 18);
-    t.globalCompositeOperation = "xor"; t.drawImage(prev.mk, 0, 0, 32, 18);
-    const d = t.getImageData(0, 0, 32, 18).data; let n = 0;
-    for (let i = 3; i < d.length; i += 4) if (d[i] > 30) n++;
-    neon.cells = n;
-  } else neon.cells = 0;
-}
 function drawNeon(ctx, now, dt, s, ox, oy) {
   const t0 = performance.now();
   neonEnsure(echo.fw, echo.fh);
-  const fb = echo.frameBox, motion = look.trail !== "full", dist = look.space === "distance";
-  const mhc = neon.mh.getContext("2d");               // smoothed current mask: blur + re-threshold rounds off the curves
-  mhc.globalCompositeOperation = "copy"; mhc.filter = neon.fHalf; mhc.drawImage(echo.live, 0, 0, neon.hw, neon.hh); mhc.filter = "none";
-  if (fb) {
-    const last = neon.ring[neon.head], bw = Math.max(8, fb[2] - fb[0]);
-    const due = dist
-      ? !last || !last.t || now - neon.lastCap >= NEON_DIST_MAX_MS || Math.hypot((fb[0] + fb[2]) / 2 - last.cx, (fb[1] + fb[3]) / 2 - last.cy) >= NEON_DIST * bw
-      : now - neon.lastCap >= NEON_STEP_MS;
-    if (due) neonCapture(now, fb, dist);
+  const fb = echo.frameBox, motion = look.trail !== "full", cur = echo.head >= 0 && echo.ring[echo.head];
+  if (cur && cur.t !== neon.lastT) {                   // new mask: smooth once (blur + re-threshold), cache its outline
+    const mhc = neon.mh.getContext("2d");
+    mhc.globalCompositeOperation = "copy"; mhc.filter = neon.fHalf; mhc.drawImage(echo.live, 0, 0, neon.hw, neon.hh); mhc.filter = "none";
+    const o = neon.olr[echo.head]; outlineOf(neon.mh, neon.er, o.c, NEON_OFFS); o.t = cur.t; neon.lastT = cur.t;
   }
-  if (!fb) { echo.neonMs = echo.neonMs ? echo.neonMs * 0.9 + (performance.now() - t0) * 0.1 : performance.now() - t0; return; }
+  const done = () => { echo.neonMs = echo.neonMs ? echo.neonMs * 0.9 + (performance.now() - t0) * 0.1 : performance.now() - t0; };
+  if (!fb) return done();
+  const n = trailSlots(now, TRAIL_MAX);
+  if (motion && n && now - neon.probeAt >= TRAIL_STEP_S * 1000) {   // motion probe: live mask XOR newest copy, 32x18 cells
+    neon.probeAt = now;
+    const t = neon.tiny.getContext("2d", { willReadFrequently: true });
+    t.globalCompositeOperation = "copy"; t.drawImage(echo.live, 0, 0, 32, 18);
+    t.globalCompositeOperation = "xor"; t.drawImage(echo.ring[trailIdx[0]].c, 0, 0, 32, 18);
+    const d = t.getImageData(0, 0, 32, 18).data; let c = 0;
+    for (let i = 3; i < d.length; i += 4) if (d[i] > 30) c++;
+    neon.cells = c;
+  }
   // Motion only: the trail fades in with movement and dissolves (more slowly) when the subject stops
   const want = motion ? Math.min(1, Math.max(0, (neon.cells - 1) / 5)) : 1;
   neon.gain += (want - neon.gain) * (1 - Math.exp(-dt / (want > neon.gain ? 0.08 : 0.45)));
-  const acc = neon.acc.getContext("2d"), R = NEON_N, life = NEON_LIFE_MS[dist ? "distance" : "time"];
+  const acc = neon.acc.getContext("2d");
   acc.setTransform(1, 0, 0, 1, 0, 0); acc.globalAlpha = 1; acc.globalCompositeOperation = "source-over"; acc.clearRect(0, 0, neon.hw, neon.hh);
   acc.globalCompositeOperation = "lighter";
   let drawn = 0;
-  for (let k = R - 1; k >= 1; k--) {                  // oldest first; k = 1 is the newest past snapshot
-    const r = neon.ring[(neon.head - k + R * 2) % R];
-    if (!r.t) continue;
-    const fade = Math.min(1 - (now - r.t) / life, 1 - (k - 1) / (R - 1));   // dimmer with age, and with rank (sparse distance captures)
-    const alpha = 0.9 * Math.max(0, fade) * neon.gain;
+  for (let k = n - 1; k >= 0; k--) {                  // oldest first; k = 0 is the newest copy
+    const i = trailIdx[k], o = neon.olr[i];
+    if (o.t !== echo.ring[i].t) continue;              // outline only exists for masks seen while Neon was on
+    const alpha = 0.9 * (1 - k / TRAIL_MAX) * neon.gain;   // dimmer with age
     if (alpha <= 0.02) continue;
-    neonPaint(acc, r.ol, alpha); drawn++;
+    neonPaint(acc, o.c, alpha); drawn++;
   }
   if (drawn) {
-    // erase everything inside the current mask grown ~4 px, so only past outlines outside the body remain
-    acc.globalCompositeOperation = "destination-out"; acc.globalAlpha = 1;
-    for (const [gx, gy] of NEON_DIL) acc.drawImage(neon.mh, gx, gy);
+    cutBody(acc, neon.mh, 0, 0, neon.hw, neon.hh, 2);   // ~4 px at full res: only past outlines outside the body remain
     ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = "high";
     ctx.globalCompositeOperation = "lighter"; ctx.globalAlpha = 1;
     ctx.shadowColor = "rgba(255,61,154,.9)"; ctx.shadowBlur = 12;        // one glow pass for the whole trail
     ctx.drawImage(neon.acc, ox, oy, neon.w * s, neon.h * s);
   }
-  acc.globalCompositeOperation = "source-over";
   ctx.globalCompositeOperation = "source-over"; ctx.globalAlpha = 1; ctx.shadowBlur = 0;
-  echo.neonMs = echo.neonMs ? echo.neonMs * 0.9 + (performance.now() - t0) * 0.1 : performance.now() - t0;
+  done();
 }
 
 // ---------------------------------------------------------------- Handwritten lyrics (Reel look)
@@ -1716,7 +1738,7 @@ function lookChanged() {
   $("#lookBtn").textContent = reel ? "Reel" : "Classic";
   $("#lookBtn").setAttribute("aria-label", reel ? "Look: Reel. Switch to Classic" : "Look: Classic. Switch to Reel");
   $("#roomSel").value = look.room ? "1" : "0"; $("#echoSel").value = look.echo; $("#trailSel").value = look.trail; $("#spaceSel").value = look.space;
-  for (const id of ["#trailSel", "#spaceSel"]) $(id).closest("label").style.display = look.echo === "neon" ? "" : "none";
+  $("#trailSel").closest("label").style.display = look.echo === "neon" ? "" : "none";   // Spacing applies to Ghost and Neon alike
   $("#effectSel").closest("label").style.display = look.lyrics === "kinetic" ? "" : "none";   // scene-matched effects are Kinetic-only
   $("#lyricSel").value = look.lyrics; $("#optFollow").checked = look.follow; $("#optHud").checked = look.hud; $("#optLight").checked = look.lightOn;
   saveLook();
