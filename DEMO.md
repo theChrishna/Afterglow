@@ -36,7 +36,7 @@ which plays cues 1–8 here, 11 s apart, with a caption (Stop or Esc ends it).
 ## Looks
 
 - **Reel** (default; the **Reel look** chip, the Reel/Classic button, or `?preset=reel`): Violet room,
-  Neon contour trail (no outline on you; only the parts that move leave contours, to one side of you; a row of pose-history copies beside you; More > Look > Trail source switches to Motion only), handwritten lyrics above your head. Deterministic, so takes are
+  Neon contour trail (no outline on you; copies stay at the places you have just been, so walking right leaves outlines behind you on the left and a still pose leaves none; the same placement as the Classic Ghost echo, in every ambience; More > Look > Trail source: Motion only / Full pose history, Spacing: Time / Distance), handwritten lyrics above your head. Deterministic, so takes are
   reproducible. Backdrops are hidden and not generated.
 - **Classic**: moods with Muse Image backdrops, ghost echo.
 - Lyrics are **handwritten** in every scene (More > Lyrics > Style switches to Kinetic).
