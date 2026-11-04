@@ -70,6 +70,8 @@
   #perform:disabled { opacity: .45; cursor: default; }
   /* Difference keeps the echo visible on dark and bright scenes alike (an inverted, glowing ghost). */
   #ghost { mix-blend-mode: difference; }
+  #lat { position: absolute; right: 12px; top: 12px; z-index: 9; display: none; padding: 8px 10px; border-radius: 8px; background: rgba(0,0,0,.6); color: #9f9; font: 11px/1.45 ui-monospace, Menlo, monospace; white-space: pre; pointer-events: none; }
+  #lat.on { display: block; }
   #lyricsBtn { flex: 0 0 auto; border: 1px solid rgba(255,255,255,.22); border-radius: 999px; padding: 13px 16px; font: inherit;
     font-size: 14px; color: #fff; background: rgba(0,0,0,.4); backdrop-filter: blur(10px); cursor: pointer; white-space: nowrap; }
   #lyricsBtn[aria-pressed="true"] { background: rgba(255,255,255,.9); color: #000; border-color: transparent; }
@@ -128,6 +130,7 @@
   <canvas id="fx"></canvas>
   <canvas id="ghost"></canvas>
   <video id="cam" playsinline muted></video>
+  <div id="lat"></div>
   <div id="lyrics" data-anchor="center" title="Drag to place · double-click to follow you"></div>
   <div id="tint"></div>
   <div id="hud">
@@ -356,6 +359,7 @@ function frame(now) {
     gl.drawArrays(gl.TRIANGLES, 0, 3);
   }
   segmentLive(now);
+  updateLatHud(now);
   drawGhosts(now, dt);
   placeLyrics(dt);
   requestAnimationFrame(frame);
@@ -700,8 +704,8 @@ function loadSegmenter() {
     const files = await FilesetResolver.forVisionTasks(`${MP_BASE}/wasm`);
     const opts = delegate => ({ baseOptions: { modelAssetPath: MP_MODEL, delegate }, runningMode: "VIDEO",
       outputCategoryMask: false, outputConfidenceMasks: true });
-    try { return await ImageSegmenter.createFromOptions(files, opts("GPU")); }
-    catch { return await ImageSegmenter.createFromOptions(files, opts("CPU")); }
+    try { const g = await ImageSegmenter.createFromOptions(files, opts("GPU")); echo.delegate = "GPU"; return g; }
+    catch { const c = await ImageSegmenter.createFromOptions(files, opts("CPU")); echo.delegate = "CPU"; return c; }
   })().catch(err => { console.warn("on-device segmenter unavailable", err); return null; });
   return segmenterPromise;
 }
@@ -729,7 +733,7 @@ async function performOn() {
   const v = $("#cam"); v.srcObject = perf.stream;
   // Some browsers never settle play() for a hidden/odd stream: don't let that hang Perform.
   await Promise.race([v.play().catch(() => {}), new Promise(r => setTimeout(r, 1500))]);
-  perf.on = true; perfButton();
+  perf.on = true; perfButton(); watchCameraFrames();
   setStatus("thinking", "Loading the on-device segmenter…");
   const [seg, dec] = await Promise.all([loadSegmenter(), loadDecoder()]);
   echo.seg = seg; perf.decode = dec;
@@ -753,6 +757,7 @@ function segmentLive(now) {
   if (now - echo.lastSegAt < 30) return;     // cap at ~33 fps
   echo.lastVideoTime = v.currentTime;
   const t0 = performance.now();
+  echo.capT = lat.capT;
   echo.seg.segmentForVideo(v, now, result => {
     const m = result.confidenceMasks && result.confidenceMasks[0];
     if (!m) return;
@@ -780,6 +785,43 @@ function segmentLive(now) {
   echo.fps = echo.fps * 0.9 + (1000 / Math.max(1, now - echo.lastSegAt)) * 0.1;
   echo.lastSegAt = now;
   echo.segMs = performance.now() - t0;
+  lat.segEma = lat.segEma ? lat.segEma * 0.9 + echo.segMs * 0.1 : echo.segMs;
+}
+
+// ---- latency readout (key T). Numbers are estimates from requestVideoFrameCallback metadata.
+const lat = { capT: 0, camIv: 0, lastMedia: 0, camFps: 0, segEma: 0, lagEma: 0, drawIv: 0, lastDraw: 0, frames: 0, runs: 0 };
+function watchCameraFrames() {
+  const v = $("#cam");
+  if (!v.requestVideoFrameCallback) return;
+  const tick = (now, md) => {
+    lat.frames++;
+    if (lat.lastMedia && md.mediaTime !== undefined) {
+      const iv = (md.mediaTime - lat.lastMedia) * 1000;
+      if (iv > 0 && iv < 500) lat.camIv = lat.camIv ? lat.camIv * 0.9 + iv * 0.1 : iv;
+    }
+    lat.lastMedia = md.mediaTime;
+    lat.capT = md.captureTime || md.receiveTime || now;
+    lat.hasCap = !!md.captureTime;
+    if (perf.on) v.requestVideoFrameCallback(tick);
+  };
+  v.requestVideoFrameCallback(tick);
+}
+function updateLatHud(now) {
+  if (lat.lastDraw) lat.drawIv = lat.drawIv * 0.9 + (now - lat.lastDraw) * 0.1;
+  lat.lastDraw = now;
+  if (echo.capT) { const l = now - echo.capT; if (l > 0 && l < 2000) lat.lagEma = lat.lagEma ? lat.lagEma * 0.9 + l * 0.1 : l; }
+  const el = $("#lat");
+  if (!el.classList.contains("on") || (lat.hud = (lat.hud || 0) + 1) % 8) return;
+  const f = (x, d = 1) => x ? x.toFixed(d) : "–";
+  const tr = perf.stream && perf.stream.getVideoTracks()[0], st = tr ? tr.getSettings() : {};
+  el.textContent = [
+    `segmenter   ${f(lat.segEma)} ms  (${echo.delegate || "?"})`,
+    `cam frame   ${f(lat.camIv)} ms  (${f(lat.camIv ? 1000 / lat.camIv : 0, 0)} fps)`,
+    `seg runs/s  ${f(echo.fps, 0)}`,
+    `draw frame  ${f(lat.drawIv)} ms`,
+    `cam→draw    ~${f(lat.lagEma, 0)} ms (${lat.hasCap ? "captureTime" : "receiveTime"}; + display)`,
+    `camera      ${st.width || "?"}x${st.height || "?"} @ ${st.frameRate ? Math.round(st.frameRate) : "?"}`,
+  ].join("\n");
 }
 
 // SAM 3.1 snapshot every few seconds (Meta Model API); capped per visitor by the server.
@@ -919,6 +961,7 @@ function wireInput() {
     else if (k === "p") perf.on ? performOff() : performOn();
     else if (k === "l") ly.on || ly.pending ? lyricsOff() : lyricsOn();
     else if (k === "m") perf.mirror = !perf.mirror;
+    else if (k === "t") $("#lat").classList.toggle("on");
     else if (k === "e") {
       ly.effect = EFFECTS[(EFFECTS.indexOf(ly.effect) + 1) % (EFFECTS.length + 1)] || "auto";
       setStatus("ready", `Lyric effect: ${ly.effect === "auto" ? `auto (${effectNow()})` : ly.effect}`);
