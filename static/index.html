@@ -712,7 +712,8 @@ function loadSegmenter() {
 const canvas2 = (w, h) => Object.assign(document.createElement("canvas"), { width: w, height: h });
 const perf = { on: false, stream: null, timer: null, inflight: false, left: null, ghosts: [], mirror: true,
   cap: canvas2(FRAME_W, FRAME_H), scratch: canvas2(1, 1), snapshots: true };
-const ECHO_DELAYS = [7, 14, 21];             // frames behind (~0.23 / 0.47 / 0.7 s at 30 fps)
+const ECHO_DELAYS_S = [0.10, 0.22, 0.38];    // trailing copies only; the primary silhouette is never delayed
+const RING_N = 40, ALPHA_LUT = new Uint8Array(256).map((_, i) => { const c = i / 255; return c <= 0.35 ? 0 : c >= 0.65 ? 255 : ((c - 0.35) / 0.3) * 255; });
 const echo = { seg: null, live: null, trail: null, ring: [], ringAt: 0, lastVideoTime: -1, lastSegAt: 0,
   fw: 0, fh: 0, box: null, boxAt: 0, fps: 0 };
 
@@ -725,7 +726,7 @@ async function performOn() {
   if (perf.on) return;
   try {
     perf.stream = await navigator.mediaDevices.getUserMedia({ audio: false,
-      video: { width: { ideal: FRAME_W }, height: { ideal: FRAME_H }, facingMode: "user" } });
+      video: { width: { ideal: FRAME_W }, height: { ideal: FRAME_H }, frameRate: { ideal: 60, min: 24 }, facingMode: "user" } });
   } catch (err) {
     console.warn("camera unavailable", err);
     setStatus("error", "Camera unavailable."); return;
@@ -738,6 +739,7 @@ async function performOn() {
   const [seg, dec] = await Promise.all([loadSegmenter(), loadDecoder()]);
   echo.seg = seg; perf.decode = dec;
   if (!perf.on) return;
+  startSegmentLoop();
   stage.echo = seg ? "live · on-device" : "SAM only (delayed)";
   setStatus("ready", seg ? "Real-time echo on." : "Real-time echo unavailable here; using SAM snapshots.");
   setProvenance(null, null);
@@ -751,41 +753,67 @@ function performOff() {
 }
 
 // Live mask → white-with-alpha canvas, plus the performer's bounding box (for lyric placement).
-function segmentLive(now) {
+function segmentLive(now) {          // rAF fallback only: when rVFC drives segmentation this is a no-op
+  if (echo.rvfc) return;
   const v = $("#cam");
-  if (!echo.seg || !perf.on || v.readyState < 2 || v.currentTime === echo.lastVideoTime) return;
-  if (now - echo.lastSegAt < 30) return;     // cap at ~33 fps
+  if (!perf.on || v.readyState < 2 || v.currentTime === echo.lastVideoTime) return;
   echo.lastVideoTime = v.currentTime;
+  runSegmenter(v, now);
+}
+function startSegmentLoop() {      // one segmenter run per camera frame (requestVideoFrameCallback)
+  const v = $("#cam");
+  echo.rvfc = !!v.requestVideoFrameCallback;
+  if (!echo.rvfc) return;
+  const tick = (now) => {
+    if (!perf.on) return;
+    if (echo.seg && v.readyState >= 2) runSegmenter(v, performance.now());
+    v.requestVideoFrameCallback(tick);
+  };
+  v.requestVideoFrameCallback(tick);
+}
+function runSegmenter(v, now) {
+  if (!echo.seg) return;
   const t0 = performance.now();
   echo.capT = lat.capT;
   echo.seg.segmentForVideo(v, now, result => {
     const m = result.confidenceMasks && result.confidenceMasks[0];
     if (!m) return;
+    const tc = performance.now();
     const w = m.width, h = m.height, conf = m.getAsFloat32Array();
     if (!echo.live || echo.live.width !== w || echo.live.height !== h) {
-      echo.live = canvas2(w, h); echo.trail = canvas2(w, h); echo.ring = [];
-      echo.img = echo.live.getContext("2d").createImageData(w, h);
+      // (re)allocate once: a fixed ring of mask canvases + one trail; nothing is allocated per frame afterwards
+      echo.ring = Array.from({ length: RING_N }, () => ({ c: canvas2(w, h), t: 0 }));
+      echo.rctx = echo.ring.map(r => r.c.getContext("2d"));
+      echo.img = echo.rctx[0].createImageData(w, h); echo.px = new Uint32Array(echo.img.data.buffer);
+      echo.trail = canvas2(w, h); echo.head = -1; echo.live = null;
     }
-    const d = echo.img.data;
+    const px = echo.px, lut = ALPHA_LUT;
     let x1 = w, y1 = h, x2 = -1, y2 = -1;
     for (let i = 0, y = 0; y < h; y++) for (let x = 0; x < w; x++, i++) {
-      const c = conf[i], a = c <= 0.35 ? 0 : c >= 0.65 ? 255 : ((c - 0.35) / 0.3) * 255;
-      const o = i * 4; d[o] = d[o + 1] = d[o + 2] = 255; d[o + 3] = a;
+      const a = lut[(conf[i] * 255) | 0];
+      px[i] = (a << 24) | 0xFFFFFF;
       if (a > 128) { if (x < x1) x1 = x; if (x > x2) x2 = x; if (y < y1) y1 = y; if (y > y2) y2 = y; }
     }
-    echo.live.getContext("2d").putImageData(echo.img, 0, 0);
+    echo.head = (echo.head + 1) % RING_N;
+    echo.rctx[echo.head].putImageData(echo.img, 0, 0);
+    echo.ring[echo.head].t = now;
+    echo.live = echo.ring[echo.head].c;     // the CURRENT mask, zero added delay
     echo.fw = w; echo.fh = h;
     echo.frameBox = x2 >= 0 ? [x1, y1, x2 + 1, y2 + 1] : null;
-    // Ring buffer of past masks at half resolution for the delayed echo copies.
-    const keep = canvas2(Math.ceil(w / 2), Math.ceil(h / 2));
-    keep.getContext("2d").drawImage(echo.live, 0, 0, keep.width, keep.height);
-    echo.ring.push(keep);
-    if (echo.ring.length > ECHO_DELAYS[ECHO_DELAYS.length - 1] + 1) echo.ring.shift();
+    echo.convMs = performance.now() - tc;
   });
   echo.fps = echo.fps * 0.9 + (1000 / Math.max(1, now - echo.lastSegAt)) * 0.1;
   echo.lastSegAt = now;
   echo.segMs = performance.now() - t0;
   lat.segEma = lat.segEma ? lat.segEma * 0.9 + echo.segMs * 0.1 : echo.segMs;
+}
+function pastMask(now, delayS) {      // newest ring slot at least delayS old
+  const want = now - delayS * 1000;
+  for (let k = 1; k < RING_N; k++) {
+    const r = echo.ring[(echo.head - k + RING_N) % RING_N];
+    if (r.t && r.t <= want) return r.c;
+  }
+  return null;
 }
 
 // ---- latency readout (key T). Numbers are estimates from requestVideoFrameCallback metadata.
@@ -816,6 +844,7 @@ function updateLatHud(now) {
   const tr = perf.stream && perf.stream.getVideoTracks()[0], st = tr ? tr.getSettings() : {};
   el.textContent = [
     `segmenter   ${f(lat.segEma)} ms  (${echo.delegate || "?"})`,
+    `  mask→canvas ${f(echo.convMs)} ms  (${echo.fw}x${echo.fh})`,
     `cam frame   ${f(lat.camIv)} ms  (${f(lat.camIv ? 1000 / lat.camIv : 0, 0)} fps)`,
     `seg runs/s  ${f(echo.fps, 0)}`,
     `draw frame  ${f(lat.drawIv)} ms`,
@@ -922,8 +951,8 @@ function drawGhosts(now, dt) {
 
     ctx.shadowColor = rgb(cur.c[2], 0.8); ctx.shadowBlur = 30;
     ctx.globalAlpha = 0.42; ctx.drawImage(tinted(echo.trail, rgb(cur.c[1], 1)), ox, oy, dw, dh);
-    ECHO_DELAYS.forEach((lag, k) => {
-      const past = echo.ring[echo.ring.length - 1 - lag];
+    ECHO_DELAYS_S.forEach((lag, k) => {
+      const past = pastMask(now, lag);
       if (!past) return;
       ctx.globalAlpha = 0.26 - k * 0.07;
       const grow = 1 + 0.025 * (k + 1);
