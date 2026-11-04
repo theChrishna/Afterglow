@@ -591,6 +591,7 @@ function connect() {
   ws.onmessage = e => {
     let m; try { m = JSON.parse(e.data); } catch { return; }
     if (m.type === "hello") {
+      if (typeof songHello === "function") songHello(m);
       $("#status .mode").textContent = m.mode === "mock" ? "offline" : m.mode;
       stage.mode = m.mode;
       applyScene(m.scene); setBackdrop(m.backdrop); setProvenance("standby", "bank");
@@ -607,6 +608,8 @@ function connect() {
       if (m.source !== "instant") timing.release = timing.final = 0;
     } else if (m.type === "backdrop") {
       setBackdrop(m.url); setProvenance(null, "generated");
+    } else if (m.type === "song" || m.type === "song_line") {
+      if (typeof songMessage === "function") songMessage(m);
     } else if (m.type === "lyric") {
       onLyric(m.text, m.done);
     } else if (m.type === "lyrics_state") {
@@ -814,6 +817,7 @@ function toLatin(text) {
     .replace(/[\u0966-\u096F]/g, d => String(d.charCodeAt(0) - 0x966)).replace(/[\u0964\u0965]/g, ".");
 }
 function onLyric(text, done) {
+  if (typeof songActive === "function" && songActive()) return;   // Song mode is showing the song's lines
   text = toLatin(text);
   if (!ly.on) return;
   if (look.lyrics === "hand") { handLyric(text, done); ly.lastAt = performance.now(); return; }
@@ -1734,5 +1738,6 @@ $("#go").addEventListener("click", async () => {
   if (innerWidth >= 900 && !saveData) setTimeout(loadSegmenter, 2000);
 });
 </script>
+<script src="/static/song.js"></script>
 </body>
 </html>

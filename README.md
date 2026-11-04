@@ -138,3 +138,45 @@ timings. Inference stays on the main thread; moving it to a worker was not attem
   over a plain wall), not a moving person.
 - Safari and Firefox: `requestVideoFrameCallback`, canvas `filter` (feather) and the GPU mask
   path may behave differently; the fallbacks are in place but were not exercised there.
+
+## Song mode (experimental, branch only)
+
+Branch `feature/song-lyrics`; not merged to `main` and not deployed. While **Lyrics** is on and a
+song is playing near the mic, Song mode tries to recognise the song from the words the speech
+service transcribes, fetches time-synced lyrics, follows the song's position, and shows the
+current line (and the next one, dimmer) in the handwritten lyric style, including Follow subject.
+
+**Turn it on:** run the server with `SONG_MODE=1`; then tick **Song mode** in More (off by
+default, and ignored by the server unless the flag is set). It turns Lyrics on for you.
+
+**How it works**
+1. **Identify (server):** the last ~15 s of final transcript go to Muse Spark (`muse-spark-1.3`)
+   with a strict JSON schema `{title, artist, confidence}`. Spark is told never to output lyrics,
+   and anything that isn't a valid title/artist with confidence ≥ 0.4 counts as "not recognised".
+   One try per 20 s while unmatched, at most 4 per session, charged to the daily budget and
+   limited per IP.
+2. **Look up:** [LRCLIB](https://lrclib.net) (no key; the request carries only a descriptive
+   User-Agent) is searched by title/artist for synced lyrics. The candidate is accepted only if
+   the heard words fuzzy-match its lyric lines (mean similarity ≥ 0.55); otherwise it is treated
+   as not recognised. Results are cached in memory for the session.
+3. **Follow:** each time the latest heard words match a lyric line, the song clock locks to that
+   line's timestamp and then runs locally, re-syncing on every confident match (drift correction;
+   with repeated choruses the match nearest the predicted position wins). If nothing matches for
+   15 s the page falls back to plain live lyrics and listens again.
+4. **Show:** only the current and next line are sent to the browser. Status text: "Listening for
+   a song…", "Found: <title> by <artist>", "Couldn't match a song, showing live lyrics".
+
+**Honest limits**
+- Works only for songs with clear vocals that Spark recognises *from the words*; there is no
+  audio fingerprinting. Instrumental or heavily processed tracks won't match.
+- The lyric text comes from a community database (LRCLIB), **not from Meta**. The match can be
+  wrong; accuracy depends on the room, the music level and the speech service.
+- Lyrics are held in memory only for the session: never written to disk, logged or committed.
+  Tests and the MOCK mode use an invented placeholder song, not real lyrics.
+- If lyrics licensing is a concern for a public deployment, keep Song mode off (the default).
+- Not yet verified: a real song through a real mic, LRCLIB reachability from Render, latency, and
+  Spark's recognition rate.
+
+**MOCK mode:** with `MOCK=1 SONG_MODE=1`, the offline singer performs an invented song
+("Placeholder Song"), so the whole flow (listening → found → lines advancing → fallback) runs with
+no network. `static/song.js` holds all the client code for it.
